@@ -1,0 +1,12 @@
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+pydantic==2.10.3
+httpx==0.28.1
+aiofiles==24.1.0
+python-multipart==0.0.19
+yt-dlp==2024.12.13
+faster-whisper==1.1.0
+scenedetect[opencv]==0.6.5.2
+opencv-python-headless==4.10.0.84
+numpy==1.26.4
+google-genai==0.3.0

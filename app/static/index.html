@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OpenShorts Lite</title>
+  <link rel="stylesheet" href="/assets/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">🎬 OpenShorts <span>Lite</span></div>
+    <button id="settingsBtn" class="btn ghost">⚙ Settings</button>
+  </header>
+
+  <main id="app" class="container">
+    <section id="urlSection" class="card">
+      <h1>Turn any video into viral shorts</h1>
+      <p class="muted">Paste a YouTube link (or any video URL yt-dlp supports). We'll download it, transcribe it, and let the AI pick the best moments.</p>
+      <form id="urlForm" class="row">
+        <input id="urlInput" type="url" placeholder="https://www.youtube.com/watch?v=..." required />
+        <button type="submit" class="btn primary">Analyze</button>
+      </form>
+      <p id="urlError" class="error hidden"></p>
+    </section>
+
+    <section id="progressSection" class="card hidden">
+      <h2 id="progressStage">Working...</h2>
+      <div class="progress-bar"><div id="progressFill" class="progress-fill"></div></div>
+      <p id="progressMessage" class="muted"></p>
+    </section>
+
+    <section id="selectionSection" class="card hidden">
+      <h2>Pick the moments to turn into clips</h2>
+      <p class="muted">Ranked by the AI's virality score. Select the ones you want, choose your options, then generate.</p>
+      <div id="momentsList" class="moments-list"></div>
+
+      <div class="options-grid">
+        <label>Crop mode
+          <select id="cropMode">
+            <option value="auto">Auto (recommended)</option>
+            <option value="track">Track single speaker</option>
+            <option value="split">Split (two speakers)</option>
+            <option value="general">General (blurred background)</option>
+          </select>
+        </label>
+        <label class="checkbox"><input type="checkbox" id="subtitlesEnabled" checked /> Generate subtitles</label>
+        <label class="checkbox"><input type="checkbox" id="burnIn" checked /> Burn captions into video</label>
+        <div class="caption-formats">
+          <span>Caption files:</span>
+          <label class="checkbox"><input type="checkbox" class="capfmt" value="srt" checked /> SRT</label>
+          <label class="checkbox"><input type="checkbox" class="capfmt" value="vtt" checked /> VTT</label>
+          <label class="checkbox"><input type="checkbox" class="capfmt" value="ass" /> ASS (styled)</label>
+        </div>
+      </div>
+
+      <button id="generateBtn" class="btn primary">Generate clips</button>
+    </section>
+
+    <section id="resultsSection" class="card hidden">
+      <h2>Your clips</h2>
+      <div id="clipsGrid" class="clips-grid"></div>
+      <button id="startOverBtn" class="btn ghost">Start a new video</button>
+    </section>
+  </main>
+
+  <div id="settingsModal" class="modal hidden">
+    <div class="modal-content">
+      <h2>Settings</h2>
+
+      <label>LLM Provider
+        <select id="llmProvider">
+          <option value="openrouter">OpenRouter (any model)</option>
+          <option value="gemini">Google Gemini (direct)</option>
+        </select>
+      </label>
+
+      <div id="openrouterFields">
+        <label>OpenRouter API key
+          <input id="openrouterKey" type="password" placeholder="sk-or-..." />
+        </label>
+        <button id="loadModelsBtn" class="btn ghost small" type="button">Load available models</button>
+        <label>Model
+          <select id="openrouterModel"></select>
+        </label>
+      </div>
+
+      <div id="geminiFields">
+        <label>Gemini API key
+          <input id="geminiKey" type="password" placeholder="AIza..." />
+        </label>
+        <label>Model
+          <select id="geminiModel">
+            <option value="gemini-2.5-flash">gemini-2.5-flash</option>
+            <option value="gemini-2.5-pro">gemini-2.5-pro</option>
+            <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+          </select>
+        </label>
+      </div>
+
+      <label>Whisper model size
+        <select id="whisperSize">
+          <option value="tiny">tiny (fastest, least accurate)</option>
+          <option value="base">base</option>
+          <option value="small">small (recommended)</option>
+          <option value="medium">medium (slower, more accurate)</option>
+        </select>
+      </label>
+
+      <details id="cookiesDetails">
+        <summary>YouTube blocking downloads with "Sign in to confirm you're not a bot"?</summary>
+        <p class="muted">Export cookies from a browser where you're logged into YouTube (e.g. the "Get cookies.txt" extension) and paste the contents below. This lets downloads authenticate as you and reliably fixes bot-check errors on cloud/VPS hosting.</p>
+        <textarea id="cookiesTxt" rows="4" placeholder="# Netscape HTTP Cookie File..."></textarea>
+        <button id="saveCookiesBtn" class="btn ghost small" type="button">Save cookies</button>
+        <span id="cookiesStatus" class="muted"></span>
+      </details>
+
+      <label>Processing device
+        <select id="device">
+          <option value="auto">Auto-detect (recommended)</option>
+          <option value="cpu">Force CPU</option>
+          <option value="cuda">Force GPU (NVIDIA)</option>
+        </select>
+      </label>
+
+      <p id="settingsStatus" class="muted"></p>
+      <div class="row">
+        <button id="saveSettingsBtn" class="btn primary">Save</button>
+        <button id="closeSettingsBtn" class="btn ghost">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/assets/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,5 @@
+# Optional: improves face-detection accuracy for smart cropping.
+# Not all platforms ship a working wheel (notably some linux/arm64 combos),
+# so it is installed best-effort. The app falls back to OpenCV's built-in
+# Haar cascade face detector when mediapipe is unavailable.
+mediapipe==0.10.14

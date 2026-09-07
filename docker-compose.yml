@@ -1,0 +1,15 @@
+services:
+  openshorts-lite:
+    build: .
+    image: openshorts-lite
+    ports:
+      - "8000:8000"
+    volumes:
+      - openshorts_data:/data
+    env_file:
+      - path: .env
+        required: false
+    restart: unless-stopped
+
+volumes:
+  openshorts_data:
