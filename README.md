@@ -69,21 +69,20 @@ Click **⚙ Settings** in the dashboard:
 
 Keys are stored locally in `/data/config.json` inside your own container/volume — they are never sent anywhere except the provider they belong to (OpenRouter or Google).
 
-### If YouTube says "Sign in to confirm you're not a bot"
+### How YouTube downloads stay reliable
 
-YouTube increasingly bot-checks requests from datacenter/cloud IPs (common
-when self-hosting on a VPS or platform like Railway — much less common on
-a home Windows/Mac connection). The app already retries downloads across
-several internal YouTube player clients (Android, iOS, TV, Safari) which
-resolves most cases automatically. If it still happens:
+YouTube actively fights automated downloading in two layers, and this app handles both:
+
+1. **Bot-check ("Sign in to confirm you're not a bot")** — triggered mostly from datacenter/cloud IPs (VPS hosting, Railway) and much less on a home connection. The app retries across several internal YouTube player clients automatically, which resolves most cases. If it still happens, add cookies from a logged-in browser session (below).
+2. **PO tokens ("The page needs to be reloaded" / "No video formats found")** — YouTube now requires a per-request "proof of origin" token to actually serve video formats, enforced hardest against cloud IPs. The Docker image bundles [Deno](https://deno.com) plus the [bgutil-ytdlp-pot-provider](https://github.com/Brainicism/bgutil-ytdlp-pot-provider) plugin, which generates these tokens locally on every request — no external token server needed, and no action required from you. This also needs yt-dlp itself to stay current, which is why it's intentionally left unpinned in `requirements.txt` (rebuild the image periodically to pick up fixes for YouTube's frequent internal changes).
+
+If downloads still fail with a bot-check error after all that, add cookies:
 
 1. Install a "cookies.txt" export extension in a browser where you're logged into YouTube (e.g. *Get cookies.txt LOCALLY*).
 2. Export cookies for youtube.com.
 3. In the dashboard, open **⚙ Settings** → expand the bot-check section → paste the cookies file contents → **Save & validate cookies**.
 
 The app immediately makes a real (download-free) request to YouTube with those cookies and tells you right there whether they actually work — no guessing until your next real download. Use **Re-check saved cookies** any time later to confirm they haven't expired.
-
-Downloads will then authenticate as that browser session.
 
 ## How the smart cropping works
 

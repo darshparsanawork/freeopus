@@ -52,6 +52,12 @@ def _base_opts(out_dir: Path, progress_cb) -> dict:
         "restrictfilenames": True,
         "retries": 5,
         "fragment_retries": 5,
+        # YouTube's "n challenge" (signature deobfuscation) requires yt-dlp
+        # to run a small JS solver script; this opts in to fetching it from
+        # yt-dlp's own GitHub releases. Without it, formats silently go
+        # missing and extraction eventually fails with unrelated-looking
+        # errors like "The page needs to be reloaded."
+        "remote_components": {"ejs:github"},
         "postprocessors": [
             {"key": "FFmpegVideoConvertor", "preferedformat": "mp4"},
         ],
@@ -64,6 +70,11 @@ def _base_opts(out_dir: Path, progress_cb) -> dict:
 def _is_bot_check_error(exc: Exception) -> bool:
     msg = str(exc).lower()
     return "sign in to confirm" in msg or "not a bot" in msg
+
+
+def _is_stale_session_error(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return "page needs to be reloaded" in msg or "no video formats found" in msg
 
 
 def download_video(url: str, out_dir: Path, progress_cb: Optional[Callable[[float, str], None]] = None) -> Path:
@@ -84,9 +95,9 @@ def download_video(url: str, out_dir: Path, progress_cb: Optional[Callable[[floa
             last_exc = exc
             for f in out_dir.glob("source.*"):
                 f.unlink(missing_ok=True)
-            if not _is_bot_check_error(exc):
-                # Not a bot-check failure (e.g. bad URL, private video) -
-                # retrying with a different client won't help.
+            if not (_is_bot_check_error(exc) or _is_stale_session_error(exc)):
+                # Not a bot-check / stale-session failure (e.g. bad URL,
+                # private video) - retrying with a different client won't help.
                 break
             continue
 
@@ -98,6 +109,12 @@ def download_video(url: str, out_dir: Path, progress_cb: Optional[Callable[[floa
                 "This is common on cloud/VPS hosting. Fix: export cookies from a logged-in "
                 "browser session (see README) and place them at "
                 f"{COOKIES_PATH} to let downloads authenticate as you."
+            )
+        elif _is_stale_session_error(last_exc):
+            hint = (
+                " This usually means the saved cookies are stale/expired, or a PO-token "
+                "issue on this server's IP. Try re-exporting fresh cookies from a logged-in "
+                "browser and re-validating them in Settings."
             )
         raise DownloadError(f"Could not download video: {last_exc}.{hint}") from last_exc
 
@@ -119,7 +136,8 @@ def download_video(url: str, out_dir: Path, progress_cb: Optional[Callable[[floa
 
 
 def probe_title(url: str) -> str:
-    with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "skip_download": True}) as ydl:
+    opts = {"quiet": True, "no_warnings": True, "skip_download": True, "remote_components": {"ejs:github"}}
+    with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=False)
         return info.get("title", url)
 
@@ -143,18 +161,29 @@ def validate_cookies() -> dict:
         "no_warnings": True,
         "skip_download": True,
         "cookiefile": str(COOKIES_PATH),
+        "remote_components": {"ejs:github"},
     }
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(_VALIDATION_URL, download=False)
         title = info.get("title", "video") if info else "video"
-        return {"valid": True, "message": f"Cookies work — fetched metadata for \"{title}\" successfully."}
+        n_formats = len(info.get("formats", [])) if info else 0
+        return {
+            "valid": True,
+            "message": f"Cookies work — fetched metadata for \"{title}\" successfully ({n_formats} formats found).",
+        }
     except yt_dlp.utils.DownloadError as exc:
         if _is_bot_check_error(exc):
             return {
                 "valid": False,
                 "message": "Still blocked: YouTube did not accept these cookies as a logged-in session. "
                 "Make sure you exported them while actually signed in, and that they haven't expired.",
+            }
+        if _is_stale_session_error(exc):
+            return {
+                "valid": False,
+                "message": "The cookies loaded, but YouTube still rejected the session "
+                "(often means they're expired). Try exporting a fresh cookies.txt.",
             }
         return {"valid": False, "message": f"Could not verify cookies: {exc}"}
     except Exception as exc:  # noqa: BLE001

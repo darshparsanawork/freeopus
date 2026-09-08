@@ -4,7 +4,14 @@ pydantic==2.10.3
 httpx==0.28.1
 aiofiles==24.1.0
 python-multipart==0.0.19
-yt-dlp==2024.12.13
+# Intentionally unpinned: YouTube changes its player internals often
+# enough that yt-dlp ships fixes every few weeks, and an old pinned
+# version reliably breaks with errors like "No video formats found!".
+# Always install the latest at build/deploy time instead.
+yt-dlp
+# yt-dlp plugin: generates YouTube PO (proof-of-origin) tokens locally via
+# the Deno runtime installed in the Docker image. See Dockerfile for why.
+bgutil-ytdlp-pot-provider
 faster-whisper==1.1.0
 scenedetect[opencv]==0.6.5.2
 opencv-python-headless==4.10.0.84
