@@ -122,3 +122,40 @@ def probe_title(url: str) -> str:
     with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "skip_download": True}) as ydl:
         info = ydl.extract_info(url, download=False)
         return info.get("title", url)
+
+
+# A stable, always-public YouTube video used purely to test whether the
+# saved cookies let yt-dlp authenticate as a logged-in user. No download
+# happens - this only fetches metadata.
+_VALIDATION_URL = "https://www.youtube.com/watch?v=jNQXAC9IVRw"
+
+
+def validate_cookies() -> dict:
+    """Tests the currently saved cookies.txt against a real YouTube request.
+
+    Returns {"valid": bool, "message": str}. Never raises.
+    """
+    if not COOKIES_PATH.exists():
+        return {"valid": False, "message": "No cookies file saved yet."}
+
+    opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+        "cookiefile": str(COOKIES_PATH),
+    }
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(_VALIDATION_URL, download=False)
+        title = info.get("title", "video") if info else "video"
+        return {"valid": True, "message": f"Cookies work — fetched metadata for \"{title}\" successfully."}
+    except yt_dlp.utils.DownloadError as exc:
+        if _is_bot_check_error(exc):
+            return {
+                "valid": False,
+                "message": "Still blocked: YouTube did not accept these cookies as a logged-in session. "
+                "Make sure you exported them while actually signed in, and that they haven't expired.",
+            }
+        return {"valid": False, "message": f"Could not verify cookies: {exc}"}
+    except Exception as exc:  # noqa: BLE001
+        return {"valid": False, "message": f"Could not verify cookies: {exc}"}

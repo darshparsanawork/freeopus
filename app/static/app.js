@@ -219,14 +219,33 @@ $("#closeSettingsBtn").addEventListener("click", () => settingsModal.classList.a
 $("#saveCookiesBtn").addEventListener("click", async () => {
   const text = $("#cookiesTxt").value.trim();
   if (!text) return;
+  $("#cookiesStatus").textContent = "Saving and checking against YouTube...";
+  $("#cookiesStatus").className = "muted";
   try {
-    await api("/api/youtube-cookies", { method: "POST", body: JSON.stringify({ cookies_txt: text }) });
-    $("#cookiesStatus").textContent = "Saved.";
+    const result = await api("/api/youtube-cookies", { method: "POST", body: JSON.stringify({ cookies_txt: text }) });
+    setCookiesStatus(result.valid, result.message);
     $("#cookiesTxt").value = "";
   } catch (err) {
-    $("#cookiesStatus").textContent = err.message;
+    setCookiesStatus(false, err.message);
   }
 });
+
+$("#revalidateCookiesBtn").addEventListener("click", async () => {
+  $("#cookiesStatus").textContent = "Checking against YouTube...";
+  $("#cookiesStatus").className = "muted";
+  try {
+    const result = await api("/api/youtube-cookies/validate", { method: "POST" });
+    setCookiesStatus(result.valid, result.message);
+  } catch (err) {
+    setCookiesStatus(false, err.message);
+  }
+});
+
+function setCookiesStatus(valid, message) {
+  const el = $("#cookiesStatus");
+  el.textContent = (valid ? "✅ " : "❌ ") + message;
+  el.className = valid ? "success" : "error";
+}
 $("#llmProvider").addEventListener("change", toggleProviderFields);
 
 function toggleProviderFields() {

@@ -63,6 +63,7 @@ Click **⚙ Settings** in the dashboard:
 
 - **OpenRouter** (recommended): paste one API key from [openrouter.ai/keys](https://openrouter.ai/keys), click **Load available models**, and pick whichever model you want to use for moment-picking (Gemini, Claude, GPT, Llama, etc. — anything OpenRouter exposes).
 - **Gemini (direct)**: alternatively, paste a key from [aistudio.google.com/apikey](https://aistudio.google.com/apikey) and pick a Gemini model directly, without going through OpenRouter.
+- The Settings panel explains exactly what this model is used for (only the transcript + scene list — never the video/audio itself — to pick clip-worthy moments) and what the original OpenShorts project uses for the same step, so you can judge tradeoffs before picking one instead of guessing from a bare model name.
 - **Whisper model size**: `small` is the default and a good speed/accuracy balance on CPU. Use `tiny`/`base` for faster turnaround on long videos, or `medium` for higher accuracy if you have the compute.
 - **Device**: leave on `Auto-detect` unless you need to force CPU or GPU.
 
@@ -78,7 +79,9 @@ resolves most cases automatically. If it still happens:
 
 1. Install a "cookies.txt" export extension in a browser where you're logged into YouTube (e.g. *Get cookies.txt LOCALLY*).
 2. Export cookies for youtube.com.
-3. In the dashboard, open **⚙ Settings** → expand the bot-check section → paste the cookies file contents → **Save cookies**.
+3. In the dashboard, open **⚙ Settings** → expand the bot-check section → paste the cookies file contents → **Save & validate cookies**.
+
+The app immediately makes a real (download-free) request to YouTube with those cookies and tells you right there whether they actually work — no guessing until your next real download. Use **Re-check saved cookies** any time later to confirm they haven't expired.
 
 Downloads will then authenticate as that browser session.
 

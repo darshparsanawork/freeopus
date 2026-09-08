@@ -74,6 +74,23 @@
         </select>
       </label>
 
+      <div class="model-explainer">
+        <strong>What this model actually does:</strong> it never sees the video or audio.
+        It only reads the text transcript (with timestamps) plus the scene-cut list, and decides
+        which moments are worth turning into a clip — for each one, it writes a start/end time,
+        a title, a one-line reason, and a 0-100 virality score. Downloading, transcribing, cropping,
+        and captioning all happen separately in plain code, regardless of which model you pick here.
+        Because it's a pure text-reasoning task (not vision, not long-context video), you don't need
+        the most expensive model — a fast/cheap "flash"-tier model is usually enough; a stronger model
+        mainly buys you punchier titles and pickier moment selection.
+        <br /><br />
+        <strong>What the original OpenShorts project uses:</strong> per its own docs, OpenShorts runs this
+        exact step on <strong>Google Gemini 3.1 Flash-Lite</strong>. Good starting points here: any
+        <code>gemini-*-flash</code> model (fast, cheap, close to what OpenShorts itself uses) for speed/cost,
+        or <code>claude-*-sonnet</code> / <code>gpt-4o</code>-class models on OpenRouter if you want more
+        careful moment picking and don't mind paying more per video.
+      </div>
+
       <div id="openrouterFields">
         <label>OpenRouter API key
           <input id="openrouterKey" type="password" placeholder="sk-or-..." />
@@ -90,9 +107,9 @@
         </label>
         <label>Model
           <select id="geminiModel">
-            <option value="gemini-2.5-flash">gemini-2.5-flash</option>
-            <option value="gemini-2.5-pro">gemini-2.5-pro</option>
-            <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+            <option value="gemini-2.5-flash">gemini-2.5-flash — recommended: fast &amp; cheap, closest match to what OpenShorts itself uses</option>
+            <option value="gemini-2.5-pro">gemini-2.5-pro — slower/pricier, best moment-picking quality</option>
+            <option value="gemini-2.0-flash">gemini-2.0-flash — older, fast, cheapest option</option>
           </select>
         </label>
       </div>
@@ -110,8 +127,11 @@
         <summary>YouTube blocking downloads with "Sign in to confirm you're not a bot"?</summary>
         <p class="muted">Export cookies from a browser where you're logged into YouTube (e.g. the "Get cookies.txt" extension) and paste the contents below. This lets downloads authenticate as you and reliably fixes bot-check errors on cloud/VPS hosting.</p>
         <textarea id="cookiesTxt" rows="4" placeholder="# Netscape HTTP Cookie File..."></textarea>
-        <button id="saveCookiesBtn" class="btn ghost small" type="button">Save cookies</button>
-        <span id="cookiesStatus" class="muted"></span>
+        <div class="row">
+          <button id="saveCookiesBtn" class="btn ghost small" type="button">Save &amp; validate cookies</button>
+          <button id="revalidateCookiesBtn" class="btn ghost small" type="button">Re-check saved cookies</button>
+        </div>
+        <p id="cookiesStatus" class="muted"></p>
       </details>
 
       <label>Processing device

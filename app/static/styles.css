@@ -77,6 +77,24 @@ input[type="url"], input[type="password"], input[type="text"], select {
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .error { color: var(--danger); }
+.success { color: #4ade80; }
+
+.model-explainer {
+  background: rgba(109, 91, 255, 0.08);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  font-size: 0.82rem;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.model-explainer strong { color: var(--text); }
+.model-explainer code {
+  background: #0d0f14;
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 0.8rem;
+}
 
 .progress-bar {
   background: #0d0f14;

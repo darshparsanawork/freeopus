@@ -37,14 +37,19 @@ def update_settings(payload: SettingsIn):
 @router.post("/youtube-cookies")
 def set_youtube_cookies(payload: CookiesIn):
     """Saves a Netscape-format cookies.txt export so yt-dlp can authenticate
-    as a logged-in user, which resolves YouTube's bot-check on most cloud IPs."""
+    as a logged-in user, which resolves YouTube's bot-check on most cloud IPs.
+
+    Immediately validates the cookies against a real YouTube request so the
+    UI can tell the user right away whether they actually work, rather than
+    only finding out on the next real download."""
     text = payload.cookies_txt.strip()
     if not text:
         raise HTTPException(400, "Paste your exported cookies.txt content")
-    from ..pipeline.downloader import COOKIES_PATH
+    from ..pipeline.downloader import COOKIES_PATH, validate_cookies
 
     COOKIES_PATH.write_text(text + "\n", encoding="utf-8")
-    return {"saved": True}
+    result = validate_cookies()
+    return {"saved": True, **result}
 
 
 @router.get("/youtube-cookies")
@@ -52,6 +57,13 @@ def has_youtube_cookies():
     from ..pipeline.downloader import COOKIES_PATH
 
     return {"has_cookies": COOKIES_PATH.exists()}
+
+
+@router.post("/youtube-cookies/validate")
+def validate_youtube_cookies():
+    from ..pipeline.downloader import validate_cookies
+
+    return validate_cookies()
 
 
 @router.get("/openrouter/models")
