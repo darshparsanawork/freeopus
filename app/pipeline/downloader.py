@@ -97,7 +97,10 @@ def _is_stale_session_error(exc: Exception) -> bool:
     return "page needs to be reloaded" in msg or "no video formats found" in msg
 
 
-def download_video(url: str, out_dir: Path, progress_cb: Optional[Callable[[float, str], None]] = None) -> Path:
+def download_video(
+    url: str, out_dir: Path, progress_cb: Optional[Callable[[float, str], None]] = None
+) -> tuple[Path, str]:
+    """Returns (source_file_path, video_title)."""
     out_dir.mkdir(parents=True, exist_ok=True)
     target = out_dir / "source.mp4"
 
@@ -108,13 +111,15 @@ def download_video(url: str, out_dir: Path, progress_cb: Optional[Callable[[floa
     clients = _PLAYER_CLIENT_FALLBACKS if _is_youtube_url(url) else ["default"]
 
     last_exc: Optional[Exception] = None
+    title = ""
     for client in clients:
         ydl_opts = _base_opts(out_dir, progress_cb)
         if client != "default":
             ydl_opts["extractor_args"] = {"youtube": {"player_client": [client]}}
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.extract_info(url, download=True)
+                info = ydl.extract_info(url, download=True)
+                title = (info or {}).get("title", "") or ""
             last_exc = None
             break
         except yt_dlp.utils.DownloadError as exc:
@@ -163,7 +168,7 @@ def download_video(url: str, out_dir: Path, progress_cb: Optional[Callable[[floa
     if final != target:
         final.rename(target)
 
-    return target
+    return target, title
 
 
 def probe_title(url: str) -> str:

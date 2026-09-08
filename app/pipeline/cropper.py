@@ -19,12 +19,15 @@ Modes:
 """
 from __future__ import annotations
 
+import traceback
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
 import cv2
 import numpy as np
+
+from . import active_speaker
 
 TARGET_W, TARGET_H = 1080, 1920
 
@@ -127,6 +130,67 @@ def _two_largest(faces: list[FaceBox]) -> list[FaceBox]:
     return sorted(faces, key=lambda f: f.w * f.h, reverse=True)[:2]
 
 
+def _median_seat_boxes(samples: list[list[FaceBox]]) -> Optional[tuple[FaceBox, FaceBox]]:
+    """Two stable "seat" positions for a two-person scene, as the median
+    left/right face box across every sample where both were detected.
+
+    Mirrors the reference implementation's assumption for SPLIT scenes:
+    the subjects of a two-shot are seated and the boxes hold, so one
+    median position per seat for the whole clip is more robust than
+    re-detecting (and potentially losing) a face every single frame.
+    """
+    lefts, rights = [], []
+    for faces in samples:
+        two = _two_largest(faces)
+        if len(two) < 2:
+            continue
+        a, b = sorted(two, key=lambda f: f.x)
+        lefts.append(a)
+        rights.append(b)
+
+    if len(lefts) < 3:  # not enough evidence of a stable two-shot
+        return None
+
+    def median_box(boxes: list[FaceBox]) -> FaceBox:
+        return FaceBox(
+            x=float(np.median([b.x for b in boxes])),
+            y=float(np.median([b.y for b in boxes])),
+            w=float(np.median([b.w for b in boxes])),
+            h=float(np.median([b.h for b in boxes])),
+        )
+
+    return median_box(lefts), median_box(rights)
+
+
+def _seat_segments(held: list[Optional[int]], min_windows: int) -> list[tuple[int, int, Optional[int]]]:
+    """Groups a per-window `held` speaker sequence into contiguous runs,
+    returning (start_window, end_window_exclusive, speaker_or_None).
+
+    Every run *after* the first is already proof of a sustained turn: the
+    hysteresis in `hold()` only lets a new speaker take over after holding
+    the floor for `min_windows` in a row, so a transitioned-into run is
+    valid at any length. Only the clip-opening run skips that hysteresis
+    (the first speaker is accepted immediately, with no prior confirmation)
+    and so is the one case checked against min_windows here, to avoid an
+    unearned cutaway right at the start of the clip.
+    """
+    if not held:
+        return []
+    segments = []
+    seg_start = 0
+    current = held[0]
+    for i in range(1, len(held) + 1):
+        if i == len(held) or held[i] != current:
+            length = i - seg_start
+            is_opening_run = seg_start == 0
+            speaker = current if (not is_opening_run or length >= min_windows) else None
+            segments.append((seg_start, i, speaker))
+            if i < len(held):
+                seg_start = i
+                current = held[i]
+    return segments
+
+
 def render_clip(
     source_path: Path,
     out_path: Path,
@@ -171,6 +235,45 @@ def render_clip(
         crop_w = src_w
         crop_h = int(crop_w * TARGET_H / TARGET_W)
 
+    # For "split" clips, figure out (once, up front) whether this is a
+    # genuine back-and-forth conversation and, if so, which stretches of
+    # the clip have one person holding the floor long enough to earn a
+    # full-frame cutaway instead of the stacked layout. Falls back to the
+    # plain per-frame stacked split on any failure - this is a quality
+    # refinement, never a reason to fail the whole render.
+    per_frame_speaker_seat: list[Optional[int]] = [None] * n_frames
+    seats: Optional[tuple[FaceBox, FaceBox]] = None
+    if resolved_mode == "split":
+        seats = _median_seat_boxes(samples)
+        if seats is not None:
+            try:
+                boxes_px = [
+                    (s.x * src_w - s.w * src_w / 2, s.y * src_h - s.h * src_h / 2, s.w * src_w, s.h * src_h)
+                    for s in seats
+                ]
+                analysis = active_speaker.analyze_clip(source_path, start, end - start, boxes_px, fps)
+                held = analysis["held"]
+                if analysis["is_conversation"]:
+                    segments = _seat_segments(held, active_speaker.MIN_HOLD_WINDOWS)
+                    window_frames = max(1, round(fps * active_speaker.WINDOW_SECONDS))
+                    for w_start, w_end, speaker in segments:
+                        if speaker is None:
+                            continue
+                        f_start = w_start * window_frames
+                        f_end = min(n_frames, w_end * window_frames)
+                        for f in range(f_start, f_end):
+                            per_frame_speaker_seat[f] = speaker
+                elif held:
+                    # Not a real back-and-forth - one person dominates the
+                    # whole scene, so dedicate the entire clip to them
+                    # instead of stacking a silent listener alongside them.
+                    share0, share1 = active_speaker.shares(held)
+                    dominant = 0 if share0 >= share1 else 1
+                    per_frame_speaker_seat = [dominant] * n_frames
+            except Exception:  # noqa: BLE001
+                traceback.print_exc()
+                seats = None
+
     for i in range(n_frames):
         ok, frame = cap.read()
         if not ok:
@@ -178,9 +281,18 @@ def render_clip(
         cx, cy = centers[i]
 
         if resolved_mode == "split":
-            faces_here = samples[min(len(samples) - 1, i // sample_step)] if samples else []
-            two = _two_largest(faces_here) if faces_here else []
-            frame_out = _render_split(frame, two, src_w, src_h)
+            active_seat = per_frame_speaker_seat[i]
+            if seats is not None and active_seat is not None:
+                # A speaker has held the floor long enough - dedicate the
+                # full frame to them, like a real editor punching in.
+                seat = seats[active_seat]
+                frame_out = _render_track(frame, seat.x, seat.y, crop_w, crop_h, src_w, src_h)
+            elif seats is not None:
+                frame_out = _render_split_seats(frame, seats, src_w, src_h)
+            else:
+                faces_here = samples[min(len(samples) - 1, i // sample_step)] if samples else []
+                two = _two_largest(faces_here) if faces_here else []
+                frame_out = _render_split(frame, two, src_w, src_h)
         elif resolved_mode == "general":
             frame_out = _render_blurred(frame, src_w, src_h)
         else:  # track
@@ -244,6 +356,30 @@ def _render_split(frame, faces: list[FaceBox], src_w, src_h):
         cx, cy = face.x, face.y
         x = int(cx * src_w - crop_w / 2)
         y = int(cy * src_h - crop_h / 2)
+        x = max(0, min(src_w - crop_w, x))
+        y = max(0, min(src_h - crop_h, y))
+        cropped = frame[y : y + crop_h, x : x + crop_w]
+        panels.append(cv2.resize(cropped, (TARGET_W, half_h), interpolation=cv2.INTER_LANCZOS4))
+
+    return np.vstack(panels)
+
+
+def _render_split_seats(frame, seats: tuple[FaceBox, FaceBox], src_w, src_h):
+    """Same layout as _render_split, but for the two fixed clip-wide seat
+    positions rather than whatever faces were (or weren't) detected in
+    this specific frame - robust to a momentary missed detection since the
+    seat position doesn't depend on this frame at all."""
+    half_h = TARGET_H // 2
+    crop_h = src_h
+    crop_w = int(crop_h * TARGET_W / half_h)
+    if crop_w > src_w:
+        crop_w = src_w
+        crop_h = int(crop_w * half_h / TARGET_W)
+
+    panels = []
+    for seat in seats:
+        x = int(seat.x * src_w - crop_w / 2)
+        y = int(seat.y * src_h - crop_h / 2)
         x = max(0, min(src_w - crop_w, x))
         y = max(0, min(src_h - crop_h, y))
         cropped = frame[y : y + crop_h, x : x + crop_w]

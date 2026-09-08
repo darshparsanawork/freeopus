@@ -5,6 +5,7 @@ from typing import Literal, Optional
 from pydantic import BaseModel
 
 CropMode = Literal["auto", "track", "split", "general"]
+CaptionPosition = Literal["top", "middle", "bottom"]
 
 
 class CreateJobRequest(BaseModel):
@@ -35,11 +36,14 @@ class ClipOut(BaseModel):
 class JobOut(BaseModel):
     id: str
     url: str
+    title: str = ""
     stage: str
     progress: float
     message: str = ""
     error: Optional[str] = None
+    created_at: Optional[float] = None
     expires_in_seconds: Optional[float] = None
+    has_source: bool = False
     moments: list[MomentOut] = []
     clips: list[ClipOut] = []
 
@@ -50,6 +54,7 @@ class ProcessSelectionRequest(BaseModel):
     subtitles_enabled: bool = True
     burn_in: bool = True
     caption_formats: list[str] = ["srt", "vtt"]
+    caption_position: CaptionPosition = "bottom"
 
 
 class SettingsIn(BaseModel):

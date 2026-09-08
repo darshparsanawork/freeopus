@@ -54,7 +54,7 @@ def _rebase(segments: list[Segment], clip_start: float, clip_end: float) -> list
     return out
 
 
-def to_srt(segments: list[Segment], clip_start: float, clip_end: float) -> str:
+def to_srt(segments: list[Segment], clip_start: float, clip_end: float, position: str = "bottom") -> str:
     rebased = _rebase(segments, clip_start, clip_end)
     lines = []
     for i, seg in enumerate(rebased, start=1):
@@ -65,7 +65,7 @@ def to_srt(segments: list[Segment], clip_start: float, clip_end: float) -> str:
     return "\n".join(lines)
 
 
-def to_vtt(segments: list[Segment], clip_start: float, clip_end: float) -> str:
+def to_vtt(segments: list[Segment], clip_start: float, clip_end: float, position: str = "bottom") -> str:
     rebased = _rebase(segments, clip_start, clip_end)
     lines = ["WEBVTT", ""]
     for seg in rebased:
@@ -75,7 +75,21 @@ def to_vtt(segments: list[Segment], clip_start: float, clip_end: float) -> str:
     return "\n".join(lines)
 
 
-_ASS_HEADER = """[Script Info]
+# ASS numpad alignment: 2=bottom-center, 5=middle-center, 8=top-center.
+# MarginV is measured from whichever edge the alignment anchors to (ignored
+# for middle). These margins are tuned to sit clear of typical short-form
+# platform UI overlap (profile/follow button up top, caption/engagement
+# bar at the bottom) on a 1080x1920 frame, so captions never crowd the edge.
+_ASS_POSITION = {
+    "bottom": (2, 220),
+    "middle": (5, 0),
+    "top": (8, 140),
+}
+
+
+def _ass_header(position: str) -> str:
+    alignment, margin_v = _ASS_POSITION.get(position, _ASS_POSITION["bottom"])
+    return f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: 1080
 PlayResY: 1920
@@ -83,17 +97,17 @@ WrapStyle: 0
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Live,Arial Black,72,&H00FFFFFF,&H0000D7FF,&H00000000,&H90000000,-1,0,0,0,100,100,0,0,1,4,2,2,60,60,220,1
+Style: Live,Arial Black,72,&H00FFFFFF,&H0000D7FF,&H00000000,&H90000000,-1,0,0,0,100,100,0,0,1,4,2,{alignment},60,60,{margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
 
 
-def to_ass_karaoke(segments: list[Segment], clip_start: float, clip_end: float) -> str:
+def to_ass_karaoke(segments: list[Segment], clip_start: float, clip_end: float, position: str = "bottom") -> str:
     """Word-by-word highlighted captions ("live caption" style)."""
     rebased = _rebase(segments, clip_start, clip_end)
-    lines = [_ASS_HEADER]
+    lines = [_ass_header(position)]
     for seg in rebased:
         if not seg.words:
             lines.append(
@@ -113,13 +127,21 @@ def to_ass_karaoke(segments: list[Segment], clip_start: float, clip_end: float) 
 FORMATS = {"srt": to_srt, "vtt": to_vtt, "ass": to_ass_karaoke}
 
 
-def write_captions(segments: list[Segment], clip_start: float, clip_end: float, out_dir: Path, basename: str, formats: list[str]) -> dict[str, Path]:
+def write_captions(
+    segments: list[Segment],
+    clip_start: float,
+    clip_end: float,
+    out_dir: Path,
+    basename: str,
+    formats: list[str],
+    position: str = "bottom",
+) -> dict[str, Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     paths = {}
     for fmt in formats:
         if fmt not in FORMATS:
             continue
-        content = FORMATS[fmt](segments, clip_start, clip_end)
+        content = FORMATS[fmt](segments, clip_start, clip_end, position)
         path = out_dir / f"{basename}.{fmt}"
         path.write_text(content, encoding="utf-8")
         paths[fmt] = path

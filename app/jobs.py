@@ -58,6 +58,7 @@ class ClipState:
 class Job:
     id: str
     url: str
+    title: str = ""
     stage: str = "queued"
     progress: float = 0.0
     message: str = ""
@@ -83,11 +84,14 @@ class Job:
             return JobOut(
                 id=self.id,
                 url=self.url,
+                title=self.title,
                 stage=self.stage,
                 progress=self.progress,
                 message=self.message,
                 error=self.error,
+                created_at=self.created_at,
                 expires_in_seconds=expires_in,
+                has_source=self.source_path is not None,
                 moments=[MomentOut(id=m.id, start=m.start, end=m.end, title=m.title, reason=m.reason, score=m.score) for m in self.moments],
                 clips=[
                     ClipOut(
@@ -120,6 +124,11 @@ def get_job(job_id: str) -> Optional[Job]:
         return _jobs.get(job_id)
 
 
+def list_jobs() -> list[Job]:
+    with _jobs_lock:
+        return sorted(_jobs.values(), key=lambda j: j.created_at, reverse=True)
+
+
 def create_job(url: str) -> Job:
     job_id = uuid.uuid4().hex[:12]
     job_dir = config.JOBS_DIR / job_id
@@ -146,8 +155,9 @@ def _run_analysis(job: Job) -> None:
         def dl_progress(pct: float, phase: str) -> None:
             job.set_stage("downloading", pct, f"Downloading... ({phase})")
 
-        source_path = downloader.download_video(job.url, job.dir, dl_progress)
+        source_path, title = downloader.download_video(job.url, job.dir, dl_progress)
         job.source_path = source_path
+        job.title = title or job.url
 
         def tr_progress(pct: float) -> None:
             job.set_stage("transcribing", pct, "Transcribing audio via OpenRouter (openai/whisper-1)...")
@@ -176,7 +186,15 @@ def _run_analysis(job: Job) -> None:
         traceback.print_exc()
 
 
-def start_processing(job: Job, moment_ids: list[str], crop_mode: str, subtitles_enabled: bool, burn_in: bool, caption_formats: list[str]) -> None:
+def start_processing(
+    job: Job,
+    moment_ids: list[str],
+    crop_mode: str,
+    subtitles_enabled: bool,
+    burn_in: bool,
+    caption_formats: list[str],
+    caption_position: str = "bottom",
+) -> None:
     selected = [m for m in job.moments if m.id in moment_ids]
     if not selected:
         raise ValueError("No matching moments selected")
@@ -185,10 +203,20 @@ def start_processing(job: Job, moment_ids: list[str], crop_mode: str, subtitles_
         job.clips[m.id] = ClipState(id=f"clip_{m.id}", moment_id=m.id, title=m.title, start=m.start, end=m.end)
 
     job.set_stage("processing", 0, "Rendering clips...")
-    _executor.submit(_run_processing, job, selected, crop_mode, subtitles_enabled, burn_in, caption_formats)
+    _executor.submit(
+        _run_processing, job, selected, crop_mode, subtitles_enabled, burn_in, caption_formats, caption_position
+    )
 
 
-def _run_processing(job: Job, selected: list[llm.Moment], crop_mode: str, subtitles_enabled: bool, burn_in: bool, caption_formats: list[str]) -> None:
+def _run_processing(
+    job: Job,
+    selected: list[llm.Moment],
+    crop_mode: str,
+    subtitles_enabled: bool,
+    burn_in: bool,
+    caption_formats: list[str],
+    caption_position: str = "bottom",
+) -> None:
     use_gpu = ffmpeg_utils.gpu_encoder_available()
     clips_dir = job.dir / "clips"
     clips_dir.mkdir(exist_ok=True)
@@ -206,11 +234,22 @@ def _run_processing(job: Job, selected: list[llm.Moment], crop_mode: str, subtit
             final_out = clips_dir / f"{state.id}.mp4"
             if subtitles_enabled and job.transcript:
                 state.status = "captioning"
-                cap_paths = captions.write_captions(job.transcript.segments, moment.start, moment.end, clips_dir, state.id, caption_formats)
-                state.caption_formats = list(cap_paths.keys())
+                # Burning always needs an .ass file regardless of which
+                # formats the user wants to download, so it doesn't silently
+                # no-op just because they only checked SRT/VTT.
+                formats_to_write = list(caption_formats)
+                if burn_in and "ass" not in formats_to_write:
+                    formats_to_write.append("ass")
+                cap_paths = captions.write_captions(
+                    job.transcript.segments, moment.start, moment.end, clips_dir, state.id, formats_to_write, caption_position
+                )
+                state.caption_formats = [f for f in cap_paths if f in caption_formats]
                 if burn_in and "ass" in cap_paths:
                     ffmpeg_utils.burn_subtitles(raw_out, cap_paths["ass"], final_out, use_gpu)
                     raw_out.unlink(missing_ok=True)
+                    if "ass" not in caption_formats:
+                        # Only needed for burning, not requested as a download.
+                        cap_paths["ass"].unlink(missing_ok=True)
                 else:
                     raw_out.rename(final_out)
             else:
