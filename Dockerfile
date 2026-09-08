@@ -18,7 +18,11 @@ COPY app ./app
 
 ENV DATA_DIR=/data
 RUN mkdir -p /data
-VOLUME ["/data"]
+
+# Note: no VOLUME declaration here — Railway's builder rejects it ("use
+# Railway Volumes" instead). Docker Compose still gets persistence via the
+# named volume mounted at /data in docker-compose.yml; on Railway, attach a
+# Volume mounted at /data from the dashboard for the same effect.
 
 EXPOSE 8000
 ENV PORT=8000
