@@ -39,6 +39,7 @@ class JobOut(BaseModel):
     progress: float
     message: str = ""
     error: Optional[str] = None
+    expires_in_seconds: Optional[float] = None
     moments: list[MomentOut] = []
     clips: list[ClipOut] = []
 
@@ -59,3 +60,4 @@ class SettingsIn(BaseModel):
     gemini_model: Optional[str] = None
     whisper_model_size: Optional[str] = None
     device: Optional[str] = None
+    transcription_provider: Optional[str] = None

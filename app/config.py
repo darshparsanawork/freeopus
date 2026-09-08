@@ -31,6 +31,7 @@ class Settings(BaseModel):
     gemini_model: str = "gemini-2.5-flash"
     whisper_model_size: str = "small"
     device: str = "auto"  # "auto" | "cpu" | "cuda"
+    transcription_provider: str = "local"  # "local" (faster-whisper) | "openrouter" (openai/whisper-1)
 
 
 def _defaults_from_env() -> Settings:
@@ -65,6 +66,7 @@ def public_settings(settings: Settings) -> dict:
         "gemini_model": settings.gemini_model,
         "whisper_model_size": settings.whisper_model_size,
         "device": settings.device,
+        "transcription_provider": settings.transcription_provider,
         "has_openrouter_key": bool(settings.openrouter_api_key),
         "has_gemini_key": bool(settings.gemini_api_key),
     }

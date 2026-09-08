@@ -64,10 +64,18 @@ Click **⚙ Settings** in the dashboard:
 - **OpenRouter** (recommended): paste one API key from [openrouter.ai/keys](https://openrouter.ai/keys), click **Load available models**, and pick whichever model you want to use for moment-picking (Gemini, Claude, GPT, Llama, etc. — anything OpenRouter exposes).
 - **Gemini (direct)**: alternatively, paste a key from [aistudio.google.com/apikey](https://aistudio.google.com/apikey) and pick a Gemini model directly, without going through OpenRouter.
 - The Settings panel explains exactly what this model is used for (only the transcript + scene list — never the video/audio itself — to pick clip-worthy moments) and what the original OpenShorts project uses for the same step, so you can judge tradeoffs before picking one instead of guessing from a bare model name.
-- **Whisper model size**: `small` is the default and a good speed/accuracy balance on CPU. Use `tiny`/`base` for faster turnaround on long videos, or `medium` for higher accuracy if you have the compute.
+- **Transcription provider**: `Local (faster-whisper)` runs entirely on this server's own CPU/GPU, for free. `OpenRouter (openai/whisper-1)` sends the audio to OpenRouter instead — uses the same OpenRouter key as above, costs about $0.006/minute of audio, and offloads all the CPU work to the cloud (useful on a small/CPU-only host). Both produce the same word-level timestamps the captions feature needs.
+- **Whisper model size** (local provider only): `small` is the default and a good speed/accuracy balance on CPU. Use `tiny`/`base` for faster turnaround on long videos, or `medium` for higher accuracy if you have the compute.
 - **Device**: leave on `Auto-detect` unless you need to force CPU or GPU.
 
 Keys are stored locally in `/data/config.json` inside your own container/volume — they are never sent anywhere except the provider they belong to (OpenRouter or Google).
+
+## Storage, cleanup, and resource limits
+
+- **Everything lives under `/data`** (downloaded source video, transcript, rendered clips, captions, your saved settings) — this is what a Docker Compose volume or a Railway Volume should point at, so a redeploy or container restart doesn't lose in-flight or recent jobs.
+- **Automatic 2-hour cleanup**: a background sweeper runs every 10 minutes and deletes a job's entire folder (video, clips, captions) plus its in-memory state once it's older than `JOB_RETENTION_HOURS` (default `2`). The dashboard shows a countdown on the results page so you know when to download. This also sweeps orphaned job folders left over from before a restart, using each folder's modified time, so cleanup keeps working even if the server restarted.
+- **Bounded concurrency**: jobs run on a small worker pool (`MAX_CONCURRENT_JOBS`, default `1`) instead of one thread per request, so a burst of URLs queues up instead of all downloading/transcribing/rendering at once and starving the CPU/RAM available to any single job. Raise it if you're running on a host with more cores/RAM to spare.
+- Finished jobs also drop their in-memory transcript/scene data as soon as their clips are rendered (it's already been written to the caption files by then), rather than waiting for the full retention window to free that RAM.
 
 ### How YouTube downloads stay reliable
 

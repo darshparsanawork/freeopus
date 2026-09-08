@@ -1,14 +1,22 @@
 """In-process job state machine.
 
 Single-instance, in-memory job registry (fine for a self-hosted app run by
-one person/team). Each job runs its pipeline stages in a background
-thread so the API stays responsive for status polling.
+one person/team). Each job runs its pipeline stages on a bounded worker
+pool (not one thread per job) so a burst of requests can't pile up
+unbounded CPU/RAM use — extra jobs simply queue instead of all running
+at once. A background sweeper deletes job files (and drops the in-memory
+Job object) once they're older than JOB_RETENTION_HOURS, so disk and RAM
+usage from finished jobs don't grow forever.
 """
 from __future__ import annotations
 
+import os
+import shutil
 import threading
+import time
 import traceback
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -19,6 +27,18 @@ from .pipeline import captions, cropper, downloader, ffmpeg_utils, llm, scenes, 
 
 _jobs: dict[str, "Job"] = {}
 _jobs_lock = threading.Lock()
+
+# Bounded worker pool: caps how many jobs actually download/transcribe/
+# render at once. Extra jobs queue rather than competing for the same
+# CPU/RAM all at once. Override with MAX_CONCURRENT_JOBS if you have more
+# cores/RAM to spare.
+_MAX_CONCURRENT_JOBS = max(1, int(os.environ.get("MAX_CONCURRENT_JOBS", "1")))
+_executor = ThreadPoolExecutor(max_workers=_MAX_CONCURRENT_JOBS, thread_name_prefix="job-worker")
+
+# How long a finished job's files (and in-memory state) stick around
+# before automatic cleanup. Download your clips before this.
+JOB_RETENTION_HOURS = float(os.environ.get("JOB_RETENTION_HOURS", "2"))
+_SWEEP_INTERVAL_SECONDS = 600  # check every 10 minutes
 
 
 @dataclass
@@ -49,6 +69,7 @@ class Job:
     moments: list[llm.Moment] = field(default_factory=list)
     clips: dict[str, ClipState] = field(default_factory=dict)
     lock: threading.Lock = field(default_factory=threading.Lock)
+    created_at: float = field(default_factory=time.time)
 
     def set_stage(self, stage: str, progress: float = 0.0, message: str = "") -> None:
         with self.lock:
@@ -58,6 +79,7 @@ class Job:
 
     def to_out(self) -> JobOut:
         with self.lock:
+            expires_in = max(0.0, JOB_RETENTION_HOURS * 3600 - (time.time() - self.created_at))
             return JobOut(
                 id=self.id,
                 url=self.url,
@@ -65,6 +87,7 @@ class Job:
                 progress=self.progress,
                 message=self.message,
                 error=self.error,
+                expires_in_seconds=expires_in,
                 moments=[MomentOut(id=m.id, start=m.start, end=m.end, title=m.title, reason=m.reason, score=m.score) for m in self.moments],
                 clips=[
                     ClipOut(
@@ -82,6 +105,15 @@ class Job:
                 ],
             )
 
+    def touch_freed(self) -> None:
+        """Drops large in-memory pipeline data once it's no longer needed
+        (kept only long enough to render selected clips), independent of
+        full job cleanup - cuts RAM use for jobs that finish but haven't
+        hit the retention window yet."""
+        with self.lock:
+            self.transcript = None
+            self.scene_list = []
+
 
 def get_job(job_id: str) -> Optional[Job]:
     with _jobs_lock:
@@ -95,7 +127,8 @@ def create_job(url: str) -> Job:
     job = Job(id=job_id, url=url, dir=job_dir)
     with _jobs_lock:
         _jobs[job_id] = job
-    threading.Thread(target=_run_analysis, args=(job,), daemon=True).start()
+    job.set_stage("queued", 0, "Queued — waiting for a free worker slot...")
+    _executor.submit(_run_analysis, job)
     return job
 
 
@@ -110,14 +143,19 @@ def _run_analysis(job: Job) -> None:
         source_path = downloader.download_video(job.url, job.dir, dl_progress)
         job.source_path = source_path
 
-        job.set_stage("transcribing", 0, "Transcribing audio...")
-
         def tr_progress(pct: float) -> None:
             job.set_stage("transcribing", pct, "Transcribing audio...")
 
-        transcript = transcriber.transcribe(
-            source_path, model_size=settings.whisper_model_size, device=settings.device, progress_cb=tr_progress
-        )
+        if settings.transcription_provider == "openrouter":
+            job.set_stage("transcribing", 0, "Transcribing audio via OpenRouter (openai/whisper-1)...")
+            transcript = transcriber.transcribe_via_openrouter(
+                source_path, settings.openrouter_api_key, progress_cb=tr_progress
+            )
+        else:
+            job.set_stage("transcribing", 0, "Transcribing audio locally...")
+            transcript = transcriber.transcribe(
+                source_path, model_size=settings.whisper_model_size, device=settings.device, progress_cb=tr_progress
+            )
         job.transcript = transcript
 
         job.set_stage("detecting_scenes", 50, "Detecting scene cuts...")
@@ -149,9 +187,7 @@ def start_processing(job: Job, moment_ids: list[str], crop_mode: str, subtitles_
         job.clips[m.id] = ClipState(id=f"clip_{m.id}", moment_id=m.id, title=m.title, start=m.start, end=m.end)
 
     job.set_stage("processing", 0, "Rendering clips...")
-    threading.Thread(
-        target=_run_processing, args=(job, selected, crop_mode, subtitles_enabled, burn_in, caption_formats), daemon=True
-    ).start()
+    _executor.submit(_run_processing, job, selected, crop_mode, subtitles_enabled, burn_in, caption_formats)
 
 
 def _run_processing(job: Job, selected: list[llm.Moment], crop_mode: str, subtitles_enabled: bool, burn_in: bool, caption_formats: list[str]) -> None:
@@ -189,3 +225,51 @@ def _run_processing(job: Job, selected: list[llm.Moment], crop_mode: str, subtit
             traceback.print_exc()
 
     job.set_stage("done", 100, "All clips are ready.")
+    # Transcript/scene data already went into the caption files on disk -
+    # no need to keep it resident in RAM for a job that's done rendering.
+    job.touch_freed()
+
+
+def _delete_job_files(job_dir: Path) -> None:
+    shutil.rmtree(job_dir, ignore_errors=True)
+
+
+def _sweep_expired_jobs() -> None:
+    """Deletes job files (and drops in-memory Job objects) once they're
+    older than JOB_RETENTION_HOURS. Also sweeps orphaned job directories
+    left on disk from before a restart, using directory mtime, so cleanup
+    stays effective even if the in-memory registry was reset."""
+    cutoff_age = JOB_RETENTION_HOURS * 3600
+    now = time.time()
+
+    with _jobs_lock:
+        expired_ids = [jid for jid, job in _jobs.items() if now - job.created_at > cutoff_age]
+        expired_dirs = [_jobs[jid].dir for jid in expired_ids]
+        for jid in expired_ids:
+            del _jobs[jid]
+
+    for job_dir in expired_dirs:
+        _delete_job_files(job_dir)
+
+    known_dirs = {job.dir for job in _jobs.values()}
+    try:
+        for entry in config.JOBS_DIR.iterdir():
+            if not entry.is_dir() or entry in known_dirs:
+                continue
+            if now - entry.stat().st_mtime > cutoff_age:
+                _delete_job_files(entry)
+    except FileNotFoundError:
+        pass
+
+
+def _sweeper_loop() -> None:
+    while True:
+        try:
+            _sweep_expired_jobs()
+        except Exception:  # noqa: BLE001
+            traceback.print_exc()
+        time.sleep(_SWEEP_INTERVAL_SECONDS)
+
+
+def start_background_sweeper() -> None:
+    threading.Thread(target=_sweeper_loop, daemon=True).start()

@@ -58,6 +58,7 @@
 
     <section id="resultsSection" class="card hidden">
       <h2>Your clips</h2>
+      <p id="expiryNotice" class="muted"></p>
       <div id="clipsGrid" class="clips-grid"></div>
       <button id="startOverBtn" class="btn ghost">Start a new video</button>
     </section>
@@ -114,7 +115,20 @@
         </label>
       </div>
 
-      <label>Whisper model size
+      <div class="model-explainer">
+        <strong>Transcription</strong> turns the video's audio into a word-by-word text transcript
+        (with timestamps) — this is what powers subtitles/captions and is what the LLM above reads
+        to pick moments. It's a separate step from the LLM and runs independently of it.
+      </div>
+
+      <label>Transcription provider
+        <select id="transcriptionProvider">
+          <option value="local">Local (faster-whisper) — free, runs on this server's CPU/GPU</option>
+          <option value="openrouter">OpenRouter (openai/whisper-1) — uses your OpenRouter key above, ~$0.006/min, offloads all CPU work to the cloud</option>
+        </select>
+      </label>
+
+      <label id="whisperSizeLabel">Local Whisper model size
         <select id="whisperSize">
           <option value="tiny">tiny (fastest, least accurate)</option>
           <option value="base">base</option>

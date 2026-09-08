@@ -88,6 +88,7 @@ function renderJob(job) {
   if (job.stage === "processing" || job.stage === "done") {
     showOnly(resultsSection);
     renderClips(job.clips);
+    renderExpiryNotice(job.expires_in_seconds);
     return;
   }
 
@@ -95,6 +96,17 @@ function renderJob(job) {
   $("#progressStage").textContent = STAGE_LABELS[job.stage] || job.stage;
   $("#progressFill").style.width = `${job.progress}%`;
   $("#progressMessage").textContent = job.message;
+}
+
+function renderExpiryNotice(expiresInSeconds) {
+  const el = $("#expiryNotice");
+  if (expiresInSeconds == null) {
+    el.textContent = "";
+    return;
+  }
+  const hours = Math.floor(expiresInSeconds / 3600);
+  const minutes = Math.floor((expiresInSeconds % 3600) / 60);
+  el.textContent = `⏳ These clips and their files are deleted automatically in ${hours}h ${minutes}m — download what you want before then.`;
 }
 
 function renderMoments(moments) {
@@ -206,9 +218,11 @@ $("#settingsBtn").addEventListener("click", async () => {
     $("#geminiModel").value = s.gemini_model;
     $("#whisperSize").value = s.whisper_model_size;
     $("#device").value = s.device;
+    $("#transcriptionProvider").value = s.transcription_provider;
     $("#openrouterKey").placeholder = s.has_openrouter_key ? "•••••••• (saved, leave blank to keep)" : "sk-or-...";
     $("#geminiKey").placeholder = s.has_gemini_key ? "•••••••• (saved, leave blank to keep)" : "AIza...";
     toggleProviderFields();
+    toggleTranscriptionFields();
   } catch (err) {
     $("#settingsStatus").textContent = err.message;
   }
@@ -254,6 +268,13 @@ function toggleProviderFields() {
   $("#geminiFields").classList.toggle("hidden", provider !== "gemini");
 }
 
+$("#transcriptionProvider").addEventListener("change", toggleTranscriptionFields);
+
+function toggleTranscriptionFields() {
+  const isLocal = $("#transcriptionProvider").value === "local";
+  $("#whisperSizeLabel").classList.toggle("hidden", !isLocal);
+}
+
 $("#loadModelsBtn").addEventListener("click", async () => {
   const key = $("#openrouterKey").value.trim();
   if (key) {
@@ -277,6 +298,7 @@ $("#saveSettingsBtn").addEventListener("click", async () => {
     gemini_model: $("#geminiModel").value,
     whisper_model_size: $("#whisperSize").value,
     device: $("#device").value,
+    transcription_provider: $("#transcriptionProvider").value,
   };
   const orKey = $("#openrouterKey").value.trim();
   const gKey = $("#geminiKey").value.trim();

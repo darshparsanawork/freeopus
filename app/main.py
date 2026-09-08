@@ -6,12 +6,18 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
+from . import jobs as jobs_module
 from .routers import jobs, settings
 
 app = FastAPI(title="OpenShorts Lite")
 
 app.include_router(settings.router)
 app.include_router(jobs.router)
+
+
+@app.on_event("startup")
+def _start_sweeper() -> None:
+    jobs_module.start_background_sweeper()
 
 STATIC_DIR = Path(__file__).parent / "static"
 
