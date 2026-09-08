@@ -217,6 +217,7 @@ def _run_processing(
     caption_formats: list[str],
     caption_position: str = "bottom",
 ) -> None:
+    settings = config.load_settings()
     use_gpu = ffmpeg_utils.gpu_encoder_available()
     clips_dir = job.dir / "clips"
     clips_dir.mkdir(exist_ok=True)
@@ -234,6 +235,21 @@ def _run_processing(
             final_out = clips_dir / f"{state.id}.mp4"
             if subtitles_enabled and job.transcript:
                 state.status = "captioning"
+                job.set_stage("processing", i / total * 100, f"Preparing captions for clip {i+1}/{total}...")
+
+                # Fix up the language/script per clip (Whisper frequently
+                # mis-renders spoken Hindi as Urdu script, or leaves other
+                # languages untranslated) before ever writing caption files.
+                clip_segments = job.transcript.segments_between(moment.start, moment.end)
+                if settings.llm_provider == "gemini":
+                    clip_segments = llm.normalize_captions(
+                        "gemini", settings.gemini_api_key, settings.gemini_model, clip_segments
+                    )
+                else:
+                    clip_segments = llm.normalize_captions(
+                        "openrouter", settings.openrouter_api_key, settings.openrouter_model, clip_segments
+                    )
+
                 # Burning always needs an .ass file regardless of which
                 # formats the user wants to download, so it doesn't silently
                 # no-op just because they only checked SRT/VTT.
@@ -241,7 +257,7 @@ def _run_processing(
                 if burn_in and "ass" not in formats_to_write:
                     formats_to_write.append("ass")
                 cap_paths = captions.write_captions(
-                    job.transcript.segments, moment.start, moment.end, clips_dir, state.id, formats_to_write, caption_position
+                    clip_segments, moment.start, moment.end, clips_dir, state.id, formats_to_write, caption_position
                 )
                 state.caption_formats = [f for f in cap_paths if f in caption_formats]
                 if burn_in and "ass" in cap_paths:

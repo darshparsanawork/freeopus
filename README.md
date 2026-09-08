@@ -106,6 +106,11 @@ Paste a `drive.google.com/file/d/...` share link the same way as any other URL. 
   - If one person dominates the whole scene (not a real back-and-forth), the split is skipped entirely and the clip tracks that person full-frame for its whole duration, instead of wasting half the frame on a silent listener.
 - You can also force a specific mode per batch in the review screen.
 
+## Caption language handling and moment quality
+
+- **Hindi/Urdu mix-ups get fixed automatically.** Whisper frequently transcribes spoken Hindi in Urdu (Perso-Arabic) script, since the two languages sound almost identical - this shows up as captions in the wrong script even though the person is speaking Hindi. Before writing caption files for each selected clip, its transcript lines are run through the configured LLM (OpenRouter or Gemini - whichever you're already using for moment-picking, no extra key needed) with rules that always produce: **English** passthrough for genuinely English lines, **Hinglish** (Hindi written in plain Roman letters, the way people actually text - never Devanagari, never Urdu script) for Hindi content in any script, **English translation** for any other language, and **no caption at all** for a line the model isn't confident it understood correctly, rather than guessing wrong. This runs per-clip (only the few lines that clip actually uses), so it's cheap and always scoped to what's being captioned.
+- **Moments are required to be self-contained.** The moment-picking prompt explicitly rejects a candidate clip that starts or ends mid-sentence, or that depends on something said before/after the clip to make sense (e.g. "as I mentioned earlier..." or answering a question the viewer never hears) - every clip has to work as a complete thought on its own, with `start`/`end` snapped to actual transcript segment boundaries rather than an arbitrary cut point.
+
 ## Architecture (for reference)
 
 ```
