@@ -15,7 +15,7 @@
   <main id="app" class="container">
     <section id="urlSection" class="card">
       <h1>Turn any video into viral shorts</h1>
-      <p class="muted">Paste a YouTube link, a public Google Drive share link, or any other video URL yt-dlp supports. We'll download it, transcribe it, and let the AI pick the best moments.</p>
+      <p class="muted">Paste a YouTube link, a public Google Drive share link, or any other video URL yt-dlp supports. Processing keeps running in the background even if you close this tab — come back any time and it'll be waiting for you here.</p>
       <form id="urlForm" class="row">
         <input id="urlInput" type="url" placeholder="https://www.youtube.com/watch?v=..." required />
         <button type="submit" class="btn primary">Analyze</button>
@@ -23,44 +23,86 @@
       <p id="urlError" class="error hidden"></p>
     </section>
 
-    <section id="progressSection" class="card hidden">
-      <h2 id="progressStage">Working...</h2>
-      <div class="progress-bar"><div id="progressFill" class="progress-fill"></div></div>
-      <p id="progressMessage" class="muted"></p>
+    <section id="dashboardSection" class="card">
+      <h2>Your videos</h2>
+      <p id="emptyState" class="muted hidden">Nothing yet — paste a URL above to get started.</p>
+      <div id="jobsList" class="jobs-list"></div>
     </section>
 
-    <section id="selectionSection" class="card hidden">
-      <h2>Pick the moments to turn into clips</h2>
-      <p class="muted">Ranked by the AI's virality score. Select the ones you want, choose your options, then generate.</p>
-      <div id="momentsList" class="moments-list"></div>
+    <section id="detailSection" class="card hidden">
+      <button id="closeDetailBtn" class="btn ghost small">&larr; Back to your videos</button>
 
-      <div class="options-grid">
-        <label>Crop mode
-          <select id="cropMode">
-            <option value="auto">Auto (recommended)</option>
-            <option value="track">Track single speaker</option>
-            <option value="split">Split (two speakers)</option>
-            <option value="general">General (blurred background)</option>
-          </select>
-        </label>
-        <label class="checkbox"><input type="checkbox" id="subtitlesEnabled" checked /> Generate subtitles</label>
-        <label class="checkbox"><input type="checkbox" id="burnIn" checked /> Burn captions into video</label>
-        <div class="caption-formats">
-          <span>Caption files:</span>
-          <label class="checkbox"><input type="checkbox" class="capfmt" value="srt" checked /> SRT</label>
-          <label class="checkbox"><input type="checkbox" class="capfmt" value="vtt" checked /> VTT</label>
-          <label class="checkbox"><input type="checkbox" class="capfmt" value="ass" /> ASS (styled)</label>
-        </div>
+      <div id="detailProgress" class="detail-block hidden">
+        <h2 id="progressStage">Working...</h2>
+        <div class="progress-bar"><div id="progressFill" class="progress-fill"></div></div>
+        <p id="progressMessage" class="muted"></p>
       </div>
 
-      <button id="generateBtn" class="btn primary">Generate clips</button>
-    </section>
+      <div id="detailError" class="detail-block hidden">
+        <h2>Something went wrong</h2>
+        <p id="detailErrorMessage" class="error"></p>
+      </div>
 
-    <section id="resultsSection" class="card hidden">
-      <h2>Your clips</h2>
-      <p id="expiryNotice" class="muted"></p>
-      <div id="clipsGrid" class="clips-grid"></div>
-      <button id="startOverBtn" class="btn ghost">Start a new video</button>
+      <div id="detailSelection" class="detail-block hidden">
+        <h2>Pick the moments to turn into clips</h2>
+        <p class="muted">Ranked by the AI's virality score. Preview each one, select the ones you want, choose your options, then generate.</p>
+
+        <div id="previewPlayerWrap" class="preview-player hidden">
+          <video id="previewPlayer" controls></video>
+          <div class="row">
+            <span id="previewLabel" class="muted"></span>
+            <button id="closePreviewBtn" class="btn ghost small" type="button">Close preview</button>
+          </div>
+        </div>
+
+        <div id="momentsList" class="moments-list"></div>
+
+        <div class="options-grid">
+          <label>Crop mode
+            <select id="cropMode">
+              <option value="auto">Auto (recommended)</option>
+              <option value="track">Track single speaker</option>
+              <option value="split">Two speakers (smart split / cutaway)</option>
+              <option value="general">General (blurred background)</option>
+            </select>
+          </label>
+          <label class="checkbox"><input type="checkbox" id="subtitlesEnabled" checked /> Generate subtitles</label>
+          <label class="checkbox"><input type="checkbox" id="burnIn" checked /> Burn captions into video</label>
+          <div class="caption-formats">
+            <span>Caption files:</span>
+            <label class="checkbox"><input type="checkbox" class="capfmt" value="srt" checked /> SRT</label>
+            <label class="checkbox"><input type="checkbox" class="capfmt" value="vtt" checked /> VTT</label>
+            <label class="checkbox"><input type="checkbox" class="capfmt" value="ass" /> ASS (styled)</label>
+          </div>
+        </div>
+
+        <div class="caption-position-picker">
+          <span class="caption-position-label">Caption position</span>
+          <div class="caption-position-row">
+            <div class="caption-position-options">
+              <label class="radio"><input type="radio" name="captionPosition" value="top" /> Top</label>
+              <label class="radio"><input type="radio" name="captionPosition" value="middle" /> Middle</label>
+              <label class="radio"><input type="radio" name="captionPosition" value="bottom" checked /> Bottom (recommended)</label>
+            </div>
+            <div class="reel-preview">
+              <div class="reel-preview-frame">
+                <div class="reel-safe-zone reel-safe-top"></div>
+                <div class="reel-safe-zone reel-safe-bottom"></div>
+                <div id="reelCaptionBar" class="reel-caption-bar reel-caption-bottom">Your captions appear here</div>
+              </div>
+            </div>
+          </div>
+          <p class="muted small">The shaded bands are where short-form apps usually place their own UI (profile/follow up top, caption/like bar at the bottom) — captions are kept clear of both automatically.</p>
+        </div>
+
+        <button id="generateBtn" class="btn primary">Generate clips</button>
+      </div>
+
+      <div id="detailResults" class="detail-block hidden">
+        <h2>Your clips</h2>
+        <p id="expiryNotice" class="muted"></p>
+        <div id="clipsGrid" class="clips-grid"></div>
+      </div>
     </section>
   </main>
 

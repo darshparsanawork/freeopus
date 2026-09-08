@@ -7,13 +7,14 @@ to fight with. One command, one URL, one dashboard.
 
 ## What it does
 
-1. **Paste a URL** — YouTube, a public Google Drive share link, or anything else [yt-dlp](https://github.com/yt-dlp/yt-dlp) supports.
+1. **Paste a URL** — YouTube, a public Google Drive share link, or anything else [yt-dlp](https://github.com/yt-dlp/yt-dlp) supports. Runs in the background: close the tab and it keeps going.
 2. **Automatic transcription** — OpenRouter's `openai/whisper-1`, word-level timestamps, no local model or CPU cost. Long videos are automatically chunked to stay under the API's upload limit.
 3. **AI moment picking** — an LLM (via OpenRouter, any model, or direct Gemini) reads the transcript + scene cuts and proposes 3-8 clip-worthy moments with a title, reason, and virality score.
-4. **You review and pick** — see every candidate before anything is rendered; choose which ones to turn into clips.
-5. **Smart 9:16 reframing** — face-tracking crop that follows a single speaker, splits the frame for two speakers, or falls back to a blurred-background layout when no face is reliably detected.
-6. **Captions** — burned-in styled captions (word-by-word "live caption" highlight) plus downloadable SRT/VTT/ASS files.
-7. **Download** — grab the finished MP4 and caption files straight from the dashboard.
+4. **You review and pick** — preview each candidate moment in-browser at its exact timestamp before anything is rendered, then choose which ones to turn into clips.
+5. **Smart 9:16 reframing** — face-tracking crop that follows a single speaker, or an active-speaker-aware layout for two people: a genuine back-and-forth gets a stacked split, but a turn held for ~4-5 seconds+ gets a full-frame cutaway to whoever's actually talking (see "How the smart cropping works" below). Falls back to a blurred-background layout when no face is reliably detected.
+6. **Captions** — burned-in styled captions (word-by-word "live caption" highlight) at your choice of position (top/middle/bottom, previewed live before you generate) plus downloadable SRT/VTT/ASS files.
+7. **Dashboard** — every video you've submitted shows up as a card with a live status badge (queued, downloading, needs your input, rendering, ready) and an auto-delete countdown, so nothing gets lost if you navigate away mid-job.
+8. **Download** — grab the finished MP4 and caption files straight from the dashboard.
 
 ## Quickstart
 
@@ -75,6 +76,7 @@ There's no local transcription model to configure (size, device, etc.) — every
 - **Automatic 2-hour cleanup**: a background sweeper runs every 10 minutes and deletes a job's entire folder (video, clips, captions) plus its in-memory state once it's older than `JOB_RETENTION_HOURS` (default `2`). The dashboard shows a countdown on the results page so you know when to download. This also sweeps orphaned job folders left over from before a restart, using each folder's modified time, so cleanup keeps working even if the server restarted.
 - **Bounded concurrency**: jobs run on a small worker pool (`MAX_CONCURRENT_JOBS`, default `1`) instead of one thread per request, so a burst of URLs queues up instead of all downloading/transcribing/rendering at once and starving the CPU/RAM available to any single job. Raise it if you're running on a host with more cores/RAM to spare.
 - Finished jobs also drop their in-memory transcript/scene data as soon as their clips are rendered (it's already been written to the caption files by then), rather than waiting for the full retention window to free that RAM.
+- **Idle CPU/RAM is near zero.** There's no local ML model resident in memory (transcription is a network call to OpenRouter), the worker pool's threads block on nothing when there's no job, and the video preview/download endpoints stream files in fixed 1MB chunks rather than loading them whole — so a multi-hour source video never sits in RAM. The only thing that runs on a timer regardless of activity is the cleanup sweep, once every 10 minutes.
 
 ### How YouTube downloads stay reliable
 
@@ -98,7 +100,10 @@ Paste a `drive.google.com/file/d/...` share link the same way as any other URL. 
 ## How the smart cropping works
 
 - Faces are sampled a few times per second across each clip using [MediaPipe](https://developers.google.com/mediapipe) face detection when available, or OpenCV's built-in Haar cascade detector as an automatic fallback (MediaPipe wheels aren't available for every platform, so the app never hard-fails on this).
-- **Auto** mode picks between three layouts based on what it sees: `track` (one dominant face — camera smoothly follows it), `split` (two faces — each speaker gets their own cropped panel stacked vertically), and `general` (no reliable face — centered crop over a blurred full-frame background).
+- **Auto** mode picks between three base layouts: `track` (one dominant face — camera smoothly follows it), `split` (two faces detected consistently), and `general` (no reliable face — centered crop over a blurred full-frame background).
+- **Two-speaker scenes get an active-speaker-aware split**, not just a static stack. This follows the same approach as the [OpenShorts](https://github.com/mutonby/openshorts) project this app is based on (`active_speaker.py`): mouth-movement frame-differencing plus an audio-energy gate decide who's talking in each 0.4s window, and a hysteresis "hold" (tuned here to ~4-5 seconds, vs. the reference's ~1.2s) means a brief interjection is absorbed rather than triggering a switch.
+  - If both people genuinely take turns, the clip defaults to the stacked split layout, but a turn held past the ~4-5s threshold gets a full-frame cutaway to whoever's actually talking — like a real edit punching in — before returning to the stack (or cutting to the other speaker) when the turn changes.
+  - If one person dominates the whole scene (not a real back-and-forth), the split is skipped entirely and the clip tracks that person full-frame for its whole duration, instead of wasting half the frame on a silent listener.
 - You can also force a specific mode per batch in the review screen.
 
 ## Architecture (for reference)
@@ -115,7 +120,8 @@ app/
     scenes.py          PySceneDetect
     llm.py             OpenRouter + Gemini moment-picking
     cropper.py         face detection + smart 9:16 reframing
-    captions.py        SRT / VTT / ASS generation
+    active_speaker.py  mouth-movement + audio active-speaker detection for split scenes
+    captions.py        SRT / VTT / ASS generation, position-aware
     ffmpeg_utils.py    subtitle burn-in, GPU encoder detection
   static/              vanilla HTML/CSS/JS dashboard (no build step)
 ```

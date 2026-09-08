@@ -1,19 +1,17 @@
 const $ = (sel) => document.querySelector(sel);
 
-const urlSection = $("#urlSection");
-const progressSection = $("#progressSection");
-const selectionSection = $("#selectionSection");
-const resultsSection = $("#resultsSection");
+const dashboardSection = $("#dashboardSection");
+const detailSection = $("#detailSection");
+const detailProgress = $("#detailProgress");
+const detailError = $("#detailError");
+const detailSelection = $("#detailSelection");
+const detailResults = $("#detailResults");
 
-let currentJobId = null;
-let pollTimer = null;
-
-function showOnly(section) {
-  for (const s of [urlSection, progressSection, selectionSection, resultsSection]) {
-    s.classList.add("hidden");
-  }
-  section.classList.remove("hidden");
-}
+const LAST_JOB_KEY = "openshorts_last_job_id";
+let selectedJobId = localStorage.getItem(LAST_JOB_KEY) || null;
+let listPollTimer = null;
+let detailPollTimer = null;
+let previewTimeUpdateHandler = null;
 
 async function api(path, options = {}) {
   const res = await fetch(path, {
@@ -34,65 +32,163 @@ $("#urlForm").addEventListener("submit", async (e) => {
   $("#urlError").classList.add("hidden");
   try {
     const job = await api("/api/jobs", { method: "POST", body: JSON.stringify({ url }) });
-    currentJobId = job.id;
-    showOnly(progressSection);
-    pollJob();
+    $("#urlInput").value = "";
+    refreshJobsList();
+    openDetail(job.id);
   } catch (err) {
     $("#urlError").textContent = err.message;
     $("#urlError").classList.remove("hidden");
   }
 });
 
+// ---- Persistent job list (the "dashboard") ----
+const STAGE_BADGES = {
+  queued: { label: "Queued", cls: "badge-queued" },
+  downloading: { label: "Downloading", cls: "badge-working" },
+  transcribing: { label: "Transcribing", cls: "badge-working" },
+  detecting_scenes: { label: "Analyzing scenes", cls: "badge-working" },
+  analyzing: { label: "Picking moments", cls: "badge-working" },
+  awaiting_selection: { label: "Needs your input", cls: "badge-attention" },
+  processing: { label: "Rendering clips", cls: "badge-working" },
+  done: { label: "Ready to download", cls: "badge-done" },
+  error: { label: "Error", cls: "badge-error" },
+};
+
+function formatExpiry(expiresInSeconds) {
+  if (expiresInSeconds == null) return "";
+  const hours = Math.floor(expiresInSeconds / 3600);
+  const minutes = Math.floor((expiresInSeconds % 3600) / 60);
+  return `deletes in ${hours}h ${minutes}m`;
+}
+
+async function refreshJobsList() {
+  try {
+    const jobList = await api("/api/jobs");
+    renderJobsList(jobList);
+  } catch (err) {
+    // Transient network hiccup - keep the existing list visible, retry on next tick.
+  } finally {
+    clearTimeout(listPollTimer);
+    listPollTimer = setTimeout(refreshJobsList, 4000);
+  }
+}
+
+function renderJobsList(jobList) {
+  const container = $("#jobsList");
+  $("#emptyState").classList.toggle("hidden", jobList.length > 0);
+  container.innerHTML = "";
+
+  for (const job of jobList) {
+    const badge = STAGE_BADGES[job.stage] || { label: job.stage, cls: "badge-working" };
+    const card = document.createElement("div");
+    card.className = "job-card" + (job.id === selectedJobId ? " job-card-active" : "");
+    const doneClips = (job.clips || []).filter((c) => c.status === "done").length;
+    const totalClips = (job.clips || []).length;
+    let subtext = job.message || "";
+    if (job.stage === "processing" && totalClips > 0) {
+      subtext = `Rendering clip ${Math.min(doneClips + 1, totalClips)} of ${totalClips}...`;
+    } else if (job.stage === "done") {
+      subtext = `${totalClips} clip${totalClips === 1 ? "" : "s"} ready`;
+    }
+    card.innerHTML = `
+      <div class="job-card-main">
+        <div class="job-card-title">${escapeHtml(job.title || job.url)}</div>
+        <div class="job-card-sub muted">${escapeHtml(subtext)}</div>
+      </div>
+      <div class="job-card-meta">
+        <span class="badge ${badge.cls}">${badge.label}</span>
+        ${job.expires_in_seconds != null ? `<span class="job-card-expiry muted">${formatExpiry(job.expires_in_seconds)}</span>` : ""}
+      </div>
+    `;
+    if (["downloading", "transcribing", "detecting_scenes", "analyzing", "processing"].includes(job.stage)) {
+      const bar = document.createElement("div");
+      bar.className = "job-card-progress";
+      bar.innerHTML = `<div class="job-card-progress-fill" style="width:${job.progress}%"></div>`;
+      card.querySelector(".job-card-main").appendChild(bar);
+    }
+    card.addEventListener("click", () => openDetail(job.id));
+    container.appendChild(card);
+  }
+}
+
+// ---- Detail view (one job at a time) ----
+function openDetail(jobId) {
+  selectedJobId = jobId;
+  localStorage.setItem(LAST_JOB_KEY, jobId);
+  detailSection.classList.remove("hidden");
+  detailSection.scrollIntoView({ behavior: "smooth", block: "start" });
+  pollDetail();
+}
+
+$("#closeDetailBtn").addEventListener("click", () => {
+  clearTimeout(detailPollTimer);
+  selectedJobId = null;
+  localStorage.removeItem(LAST_JOB_KEY);
+  detailSection.classList.add("hidden");
+  stopPreview();
+});
+
+async function pollDetail() {
+  clearTimeout(detailPollTimer);
+  if (!selectedJobId) return;
+  try {
+    const job = await api(`/api/jobs/${selectedJobId}`);
+    renderDetail(job);
+    renderJobsListHighlight();
+    const stillWorking =
+      job.stage !== "error" &&
+      (job.stage !== "done" || (job.clips || []).some((c) => ["pending", "rendering", "captioning"].includes(c.status)));
+    if (job.stage === "awaiting_selection") return; // waiting on the user, not the server
+    if (stillWorking) {
+      detailPollTimer = setTimeout(pollDetail, 1500);
+    }
+  } catch (err) {
+    // Job may have expired/been cleaned up.
+    $("#detailErrorMessage").textContent = err.message;
+    showDetailBlock(detailError);
+  }
+}
+
+function renderJobsListHighlight() {
+  document.querySelectorAll(".job-card").forEach((el) => el.classList.remove("job-card-active"));
+}
+
+function showDetailBlock(block) {
+  for (const b of [detailProgress, detailError, detailSelection, detailResults]) {
+    b.classList.toggle("hidden", b !== block);
+  }
+}
+
 const STAGE_LABELS = {
-  queued: "Queued...",
+  queued: "Queued — waiting for a free worker slot...",
   downloading: "Downloading video",
   transcribing: "Transcribing audio",
   detecting_scenes: "Detecting scene cuts",
   analyzing: "Picking the best moments",
-  awaiting_selection: "Ready for your review",
   processing: "Rendering clips",
-  done: "Done",
-  error: "Something went wrong",
 };
 
-async function pollJob() {
-  clearTimeout(pollTimer);
-  try {
-    const job = await api(`/api/jobs/${currentJobId}`);
-    renderJob(job);
-    if (job.stage === "error") return;
-    if (job.stage !== "done") {
-      pollTimer = setTimeout(pollJob, 1500);
-    } else if (job.clips.some((c) => c.status === "pending" || c.status === "rendering" || c.status === "captioning")) {
-      pollTimer = setTimeout(pollJob, 1500);
-    }
-  } catch (err) {
-    $("#progressMessage").textContent = err.message;
-  }
-}
-
-function renderJob(job) {
+function renderDetail(job) {
   if (job.stage === "error") {
-    showOnly(progressSection);
-    $("#progressStage").textContent = "Something went wrong";
-    $("#progressMessage").textContent = job.error || job.message;
+    $("#detailErrorMessage").textContent = job.error || job.message;
+    showDetailBlock(detailError);
     return;
   }
 
   if (job.stage === "awaiting_selection") {
-    showOnly(selectionSection);
-    renderMoments(job.moments);
+    showDetailBlock(detailSelection);
+    renderMoments(job);
     return;
   }
 
   if (job.stage === "processing" || job.stage === "done") {
-    showOnly(resultsSection);
-    renderClips(job.clips);
+    showDetailBlock(detailResults);
+    renderClips(job);
     renderExpiryNotice(job.expires_in_seconds);
     return;
   }
 
-  showOnly(progressSection);
+  showDetailBlock(detailProgress);
   $("#progressStage").textContent = STAGE_LABELS[job.stage] || job.stage;
   $("#progressFill").style.width = `${job.progress}%`;
   $("#progressMessage").textContent = job.message;
@@ -109,24 +205,81 @@ function renderExpiryNotice(expiresInSeconds) {
   el.textContent = `⏳ These clips and their files are deleted automatically in ${hours}h ${minutes}m — download what you want before then.`;
 }
 
-function renderMoments(moments) {
+// ---- Moment selection + video preview ----
+function renderMoments(job) {
   const list = $("#momentsList");
   list.innerHTML = "";
-  moments.forEach((m, i) => {
+  job.moments.forEach((m, i) => {
     const div = document.createElement("div");
     div.className = "moment-item";
     div.innerHTML = `
       <input type="checkbox" class="moment-check" value="${m.id}" ${i < 5 ? "checked" : ""} />
-      <div>
+      <div class="moment-body">
         <div class="moment-title">${escapeHtml(m.title)}</div>
         <div class="moment-meta">${formatTime(m.start)} – ${formatTime(m.end)} · ${escapeHtml(m.reason)}</div>
       </div>
+      <button type="button" class="btn ghost small moment-preview-btn">▶ Preview</button>
       <div class="moment-score">${Math.round(m.score)}</div>
     `;
+    div.querySelector(".moment-preview-btn").addEventListener("click", () => previewMoment(job.id, m));
     list.appendChild(div);
   });
 }
 
+function previewMoment(jobId, moment) {
+  const wrap = $("#previewPlayerWrap");
+  const player = $("#previewPlayer");
+  wrap.classList.remove("hidden");
+  wrap.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  $("#previewLabel").textContent = `Previewing "${moment.title}" (${formatTime(moment.start)}–${formatTime(moment.end)})`;
+
+  const src = `/api/jobs/${jobId}/source`;
+  const needsNewSrc = !player.src.includes(src);
+  if (needsNewSrc) {
+    player.src = src;
+  }
+
+  if (previewTimeUpdateHandler) {
+    player.removeEventListener("timeupdate", previewTimeUpdateHandler);
+  }
+  previewTimeUpdateHandler = () => {
+    if (player.currentTime >= moment.end || player.currentTime < moment.start - 0.5) {
+      player.pause();
+      player.currentTime = moment.start;
+    }
+  };
+  player.addEventListener("timeupdate", previewTimeUpdateHandler);
+
+  const seekAndPlay = () => {
+    player.currentTime = moment.start;
+    player.play().catch(() => {});
+  };
+  if (needsNewSrc) {
+    player.addEventListener("loadedmetadata", seekAndPlay, { once: true });
+  } else {
+    seekAndPlay();
+  }
+}
+
+function stopPreview() {
+  const player = $("#previewPlayer");
+  player.pause();
+  player.removeAttribute("src");
+  player.load();
+  $("#previewPlayerWrap").classList.add("hidden");
+}
+
+$("#closePreviewBtn").addEventListener("click", stopPreview);
+
+// ---- Caption position picker (live CSS preview, no backend call needed) ----
+document.querySelectorAll('input[name="captionPosition"]').forEach((radio) => {
+  radio.addEventListener("change", () => {
+    const bar = $("#reelCaptionBar");
+    bar.className = "reel-caption-bar reel-caption-" + radio.value;
+  });
+});
+
+// ---- Generate clips ----
 $("#generateBtn").addEventListener("click", async () => {
   const momentIds = Array.from(document.querySelectorAll(".moment-check:checked")).map((el) => el.value);
   if (momentIds.length === 0) {
@@ -134,18 +287,20 @@ $("#generateBtn").addEventListener("click", async () => {
     return;
   }
   const captionFormats = Array.from(document.querySelectorAll(".capfmt:checked")).map((el) => el.value);
+  const captionPosition = document.querySelector('input[name="captionPosition"]:checked').value;
   const payload = {
     moment_ids: momentIds,
     crop_mode: $("#cropMode").value,
     subtitles_enabled: $("#subtitlesEnabled").checked,
     burn_in: $("#burnIn").checked,
     caption_formats: captionFormats,
+    caption_position: captionPosition,
   };
   $("#generateBtn").disabled = true;
   try {
-    await api(`/api/jobs/${currentJobId}/process`, { method: "POST", body: JSON.stringify(payload) });
-    showOnly(resultsSection);
-    pollJob();
+    stopPreview();
+    await api(`/api/jobs/${selectedJobId}/process`, { method: "POST", body: JSON.stringify(payload) });
+    pollDetail();
   } catch (err) {
     alert(err.message);
   } finally {
@@ -153,46 +308,40 @@ $("#generateBtn").addEventListener("click", async () => {
   }
 });
 
+// ---- Results ----
 const CLIP_STATUS_LABELS = {
   pending: "Queued",
-  rendering: "Rendering (face-tracking crop)...",
+  rendering: "Rendering (smart crop)...",
   captioning: "Adding captions...",
   done: "Ready",
   error: "Failed",
 };
 
-function renderClips(clips) {
+function renderClips(job) {
   const grid = $("#clipsGrid");
   grid.innerHTML = "";
-  clips.forEach((c) => {
+  job.clips.forEach((c) => {
     const div = document.createElement("div");
     div.className = "clip-card";
     const videoTag =
       c.status === "done"
-        ? `<video controls src="/api/jobs/${currentJobId}/clips/${c.id}/download"></video>`
-        : `<div style="aspect-ratio:9/16;background:#000;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#666;">${CLIP_STATUS_LABELS[c.status] || c.status}</div>`;
+        ? `<video controls preload="metadata" src="/api/jobs/${job.id}/clips/${c.id}/preview"></video>`
+        : `<div class="clip-placeholder">${CLIP_STATUS_LABELS[c.status] || c.status}</div>`;
     const captionLinks = (c.caption_formats || [])
-      .map((f) => `<a class="btn ghost small" href="/api/jobs/${currentJobId}/clips/${c.id}/captions/${f}" download>${f.toUpperCase()}</a>`)
+      .map((f) => `<a class="btn ghost small" href="/api/jobs/${job.id}/clips/${c.id}/captions/${f}" download>${f.toUpperCase()}</a>`)
       .join("");
     div.innerHTML = `
       ${videoTag}
       <div class="title">${escapeHtml(c.title)}</div>
       <div class="status">${CLIP_STATUS_LABELS[c.status] || c.status}${c.mode_used ? " · " + c.mode_used + " mode" : ""}${c.error ? " · " + escapeHtml(c.error) : ""}</div>
       <div class="actions">
-        ${c.status === "done" ? `<a class="btn primary small" href="/api/jobs/${currentJobId}/clips/${c.id}/download" download>Download MP4</a>` : ""}
+        ${c.status === "done" ? `<a class="btn primary small" href="/api/jobs/${job.id}/clips/${c.id}/download" download>Download MP4</a>` : ""}
         ${captionLinks}
       </div>
     `;
     grid.appendChild(div);
   });
 }
-
-$("#startOverBtn").addEventListener("click", () => {
-  clearTimeout(pollTimer);
-  currentJobId = null;
-  $("#urlInput").value = "";
-  showOnly(urlSection);
-});
 
 function formatTime(t) {
   const m = Math.floor(t / 60);
@@ -301,4 +450,9 @@ $("#saveSettingsBtn").addEventListener("click", async () => {
   }
 });
 
-showOnly(urlSection);
+// ---- Boot ----
+refreshJobsList();
+if (selectedJobId) {
+  detailSection.classList.remove("hidden");
+  pollDetail();
+}
