@@ -216,13 +216,9 @@ $("#settingsBtn").addEventListener("click", async () => {
     $("#llmProvider").value = s.llm_provider;
     $("#openrouterModel").innerHTML = `<option value="${s.openrouter_model}">${s.openrouter_model}</option>`;
     $("#geminiModel").value = s.gemini_model;
-    $("#whisperSize").value = s.whisper_model_size;
-    $("#device").value = s.device;
-    $("#transcriptionProvider").value = s.transcription_provider;
     $("#openrouterKey").placeholder = s.has_openrouter_key ? "•••••••• (saved, leave blank to keep)" : "sk-or-...";
     $("#geminiKey").placeholder = s.has_gemini_key ? "•••••••• (saved, leave blank to keep)" : "AIza...";
     toggleProviderFields();
-    toggleTranscriptionFields();
   } catch (err) {
     $("#settingsStatus").textContent = err.message;
   }
@@ -268,13 +264,6 @@ function toggleProviderFields() {
   $("#geminiFields").classList.toggle("hidden", provider !== "gemini");
 }
 
-$("#transcriptionProvider").addEventListener("change", toggleTranscriptionFields);
-
-function toggleTranscriptionFields() {
-  const isLocal = $("#transcriptionProvider").value === "local";
-  $("#whisperSizeLabel").classList.toggle("hidden", !isLocal);
-}
-
 $("#loadModelsBtn").addEventListener("click", async () => {
   const key = $("#openrouterKey").value.trim();
   if (key) {
@@ -296,9 +285,6 @@ $("#saveSettingsBtn").addEventListener("click", async () => {
     llm_provider: $("#llmProvider").value,
     openrouter_model: $("#openrouterModel").value,
     gemini_model: $("#geminiModel").value,
-    whisper_model_size: $("#whisperSize").value,
-    device: $("#device").value,
-    transcription_provider: $("#transcriptionProvider").value,
   };
   const orKey = $("#openrouterKey").value.trim();
   const gKey = $("#geminiKey").value.trim();

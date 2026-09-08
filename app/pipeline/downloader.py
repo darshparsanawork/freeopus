@@ -8,6 +8,7 @@ whisper) can rely on a predictable format regardless of the source site.
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -23,6 +24,25 @@ COOKIES_PATH = config.DATA_DIR / "cookies.txt"
 # independently, so retrying with each one is the standard yt-dlp
 # workaround and resolves the vast majority of cases without cookies.
 _PLAYER_CLIENT_FALLBACKS = ["default", "android", "ios", "tv", "web_safari"]
+
+_YOUTUBE_URL_RE = re.compile(r"(youtube\.com|youtu\.be)", re.IGNORECASE)
+_DRIVE_URL_RE = re.compile(r"drive\.google\.com", re.IGNORECASE)
+
+
+def _is_youtube_url(url: str) -> bool:
+    return bool(_YOUTUBE_URL_RE.search(url))
+
+
+def _is_drive_url(url: str) -> bool:
+    return bool(_DRIVE_URL_RE.search(url))
+
+
+def _is_drive_access_error(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return any(
+        s in msg
+        for s in ("permission", "not accessible", "cannot be downloaded", "404", "403", "restricted")
+    )
 
 
 class DownloadError(RuntimeError):
@@ -81,8 +101,14 @@ def download_video(url: str, out_dir: Path, progress_cb: Optional[Callable[[floa
     out_dir.mkdir(parents=True, exist_ok=True)
     target = out_dir / "source.mp4"
 
+    # The multi-client retry loop only matters for YouTube's bot-check/PO-
+    # token quirks. Every other site (Google Drive, Vimeo, direct file
+    # links, ...) gets one clean attempt instead of retrying the same
+    # failure five times for no benefit.
+    clients = _PLAYER_CLIENT_FALLBACKS if _is_youtube_url(url) else ["default"]
+
     last_exc: Optional[Exception] = None
-    for client in _PLAYER_CLIENT_FALLBACKS:
+    for client in clients:
         ydl_opts = _base_opts(out_dir, progress_cb)
         if client != "default":
             ydl_opts["extractor_args"] = {"youtube": {"player_client": [client]}}
@@ -103,7 +129,12 @@ def download_video(url: str, out_dir: Path, progress_cb: Optional[Callable[[floa
 
     if last_exc is not None:
         hint = ""
-        if _is_bot_check_error(last_exc):
+        if _is_drive_url(url) and _is_drive_access_error(last_exc):
+            hint = (
+                " This Google Drive file looks private or restricted. Open its Share settings "
+                "in Google Drive and set access to \"Anyone with the link\" (Viewer), then try again."
+            )
+        elif _is_bot_check_error(last_exc):
             hint = (
                 " YouTube is asking for sign-in verification from this server's IP. "
                 "This is common on cloud/VPS hosting. Fix: export cookies from a logged-in "

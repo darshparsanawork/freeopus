@@ -7,8 +7,8 @@ to fight with. One command, one URL, one dashboard.
 
 ## What it does
 
-1. **Paste a URL** — YouTube or anything [yt-dlp](https://github.com/yt-dlp/yt-dlp) supports.
-2. **Automatic transcription** — [faster-whisper](https://github.com/SYSTRAN/faster-whisper), word-level timestamps, runs on CPU or GPU.
+1. **Paste a URL** — YouTube, a public Google Drive share link, or anything else [yt-dlp](https://github.com/yt-dlp/yt-dlp) supports.
+2. **Automatic transcription** — OpenRouter's `openai/whisper-1`, word-level timestamps, no local model or CPU cost. Long videos are automatically chunked to stay under the API's upload limit.
 3. **AI moment picking** — an LLM (via OpenRouter, any model, or direct Gemini) reads the transcript + scene cuts and proposes 3-8 clip-worthy moments with a title, reason, and virality score.
 4. **You review and pick** — see every candidate before anything is rendered; choose which ones to turn into clips.
 5. **Smart 9:16 reframing** — face-tracking crop that follows a single speaker, splits the frame for two speakers, or falls back to a blurred-background layout when no face is reliably detected.
@@ -47,7 +47,7 @@ If you have an NVIDIA GPU and the [NVIDIA Container Toolkit](https://docs.nvidia
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
 ```
 
-Whisper transcription and video encoding will automatically use the GPU. Without a GPU, everything still runs — just slower — entirely on CPU (Whisper `small`, libx264 software encoding).
+Video encoding (cropping/burning captions) will automatically use the GPU. Without a GPU, encoding falls back to libx264 software encoding - transcription itself always runs via OpenRouter regardless, so GPU/CPU only affects render speed, not transcription.
 
 ## Deploying to Railway
 
@@ -61,14 +61,13 @@ Whisper transcription and video encoding will automatically use the GPU. Without
 
 Click **⚙ Settings** in the dashboard:
 
-- **OpenRouter** (recommended): paste one API key from [openrouter.ai/keys](https://openrouter.ai/keys), click **Load available models**, and pick whichever model you want to use for moment-picking (Gemini, Claude, GPT, Llama, etc. — anything OpenRouter exposes).
-- **Gemini (direct)**: alternatively, paste a key from [aistudio.google.com/apikey](https://aistudio.google.com/apikey) and pick a Gemini model directly, without going through OpenRouter.
-- The Settings panel explains exactly what this model is used for (only the transcript + scene list — never the video/audio itself — to pick clip-worthy moments) and what the original OpenShorts project uses for the same step, so you can judge tradeoffs before picking one instead of guessing from a bare model name.
-- **Transcription provider**: `Local (faster-whisper)` runs entirely on this server's own CPU/GPU, for free. `OpenRouter (openai/whisper-1)` sends the audio to OpenRouter instead — uses the same OpenRouter key as above, costs about $0.006/minute of audio, and offloads all the CPU work to the cloud (useful on a small/CPU-only host). Both produce the same word-level timestamps the captions feature needs.
-- **Whisper model size** (local provider only): `small` is the default and a good speed/accuracy balance on CPU. Use `tiny`/`base` for faster turnaround on long videos, or `medium` for higher accuracy if you have the compute.
-- **Device**: leave on `Auto-detect` unless you need to force CPU or GPU.
+- **OpenRouter API key is required** — paste one from [openrouter.ai/keys](https://openrouter.ai/keys). It's used for transcription (`openai/whisper-1`, ~$0.006/min of audio) unconditionally, plus moment-picking unless you switch that to Gemini below. Click **Load available models** to pick which model handles moment-picking (Gemini, Claude, GPT, Llama, etc. — anything OpenRouter exposes).
+- **Gemini (optional, direct)**: paste a key from [aistudio.google.com/apikey](https://aistudio.google.com/apikey) to use Gemini directly for moment-picking instead of routing that step through OpenRouter too. Transcription still goes through OpenRouter either way.
+- The Settings panel explains exactly what the moment-picking model is used for (only the transcript + scene list — never the video/audio itself) and what the original OpenShorts project uses for the same step, so you can judge tradeoffs before picking one instead of guessing from a bare model name.
 
 Keys are stored locally in `/data/config.json` inside your own container/volume — they are never sent anywhere except the provider they belong to (OpenRouter or Google).
+
+There's no local transcription model to configure (size, device, etc.) — everything transcription-related is handled by the one OpenRouter call, so there's nothing to tune and no local CPU/RAM/disk cost for it.
 
 ## Storage, cleanup, and resource limits
 
@@ -92,6 +91,10 @@ If downloads still fail with a bot-check error after all that, add cookies:
 
 The app immediately makes a real (download-free) request to YouTube with those cookies and tells you right there whether they actually work — no guessing until your next real download. Use **Re-check saved cookies** any time later to confirm they haven't expired.
 
+### Google Drive links
+
+Paste a `drive.google.com/file/d/...` share link the same way as any other URL. This works out of the box for **public** files (shared as "Anyone with the link"). If the file is private, the download fails with a clear message telling you to open its Share settings in Google Drive and set access to "Anyone with the link" — rather than a raw, confusing error.
+
 ## How the smart cropping works
 
 - Faces are sampled a few times per second across each clip using [MediaPipe](https://developers.google.com/mediapipe) face detection when available, or OpenCV's built-in Haar cascade detector as an automatic fallback (MediaPipe wheels aren't available for every platform, so the app never hard-fails on this).
@@ -107,8 +110,8 @@ app/
   config.py            local settings persistence (/data/config.json)
   models.py            request/response schemas
   pipeline/
-    downloader.py      yt-dlp
-    transcriber.py     faster-whisper
+    downloader.py      yt-dlp (YouTube, Google Drive, generic URLs)
+    transcriber.py     OpenRouter openai/whisper-1, with size-based chunking
     scenes.py          PySceneDetect
     llm.py             OpenRouter + Gemini moment-picking
     cropper.py         face detection + smart 9:16 reframing

@@ -58,6 +58,3 @@ class SettingsIn(BaseModel):
     openrouter_model: Optional[str] = None
     gemini_api_key: Optional[str] = None
     gemini_model: Optional[str] = None
-    whisper_model_size: Optional[str] = None
-    device: Optional[str] = None
-    transcription_provider: Optional[str] = None

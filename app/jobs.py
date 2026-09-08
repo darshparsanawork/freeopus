@@ -135,6 +135,12 @@ def create_job(url: str) -> Job:
 def _run_analysis(job: Job) -> None:
     settings = config.load_settings()
     try:
+        if not settings.openrouter_api_key:
+            raise RuntimeError(
+                "An OpenRouter API key is required (used for transcription, and for moment-picking "
+                "unless you've switched that to Gemini). Add one in Settings."
+            )
+
         job.set_stage("downloading", 0, "Downloading video...")
 
         def dl_progress(pct: float, phase: str) -> None:
@@ -144,18 +150,10 @@ def _run_analysis(job: Job) -> None:
         job.source_path = source_path
 
         def tr_progress(pct: float) -> None:
-            job.set_stage("transcribing", pct, "Transcribing audio...")
+            job.set_stage("transcribing", pct, "Transcribing audio via OpenRouter (openai/whisper-1)...")
 
-        if settings.transcription_provider == "openrouter":
-            job.set_stage("transcribing", 0, "Transcribing audio via OpenRouter (openai/whisper-1)...")
-            transcript = transcriber.transcribe_via_openrouter(
-                source_path, settings.openrouter_api_key, progress_cb=tr_progress
-            )
-        else:
-            job.set_stage("transcribing", 0, "Transcribing audio locally...")
-            transcript = transcriber.transcribe(
-                source_path, model_size=settings.whisper_model_size, device=settings.device, progress_cb=tr_progress
-            )
+        job.set_stage("transcribing", 0, "Transcribing audio via OpenRouter (openai/whisper-1)...")
+        transcript = transcriber.transcribe(source_path, settings.openrouter_api_key, progress_cb=tr_progress)
         job.transcript = transcript
 
         job.set_stage("detecting_scenes", 50, "Detecting scene cuts...")

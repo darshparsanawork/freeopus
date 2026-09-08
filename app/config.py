@@ -29,9 +29,6 @@ class Settings(BaseModel):
     openrouter_model: str = "google/gemini-2.5-flash"
     gemini_api_key: Optional[str] = None
     gemini_model: str = "gemini-2.5-flash"
-    whisper_model_size: str = "small"
-    device: str = "auto"  # "auto" | "cpu" | "cuda"
-    transcription_provider: str = "local"  # "local" (faster-whisper) | "openrouter" (openai/whisper-1)
 
 
 def _defaults_from_env() -> Settings:
@@ -64,9 +61,6 @@ def public_settings(settings: Settings) -> dict:
         "llm_provider": settings.llm_provider,
         "openrouter_model": settings.openrouter_model,
         "gemini_model": settings.gemini_model,
-        "whisper_model_size": settings.whisper_model_size,
-        "device": settings.device,
-        "transcription_provider": settings.transcription_provider,
         "has_openrouter_key": bool(settings.openrouter_api_key),
         "has_gemini_key": bool(settings.gemini_api_key),
     }

@@ -15,7 +15,7 @@
   <main id="app" class="container">
     <section id="urlSection" class="card">
       <h1>Turn any video into viral shorts</h1>
-      <p class="muted">Paste a YouTube link (or any video URL yt-dlp supports). We'll download it, transcribe it, and let the AI pick the best moments.</p>
+      <p class="muted">Paste a YouTube link, a public Google Drive share link, or any other video URL yt-dlp supports. We'll download it, transcribe it, and let the AI pick the best moments.</p>
       <form id="urlForm" class="row">
         <input id="urlInput" type="url" placeholder="https://www.youtube.com/watch?v=..." required />
         <button type="submit" class="btn primary">Analyze</button>
@@ -118,24 +118,11 @@
       <div class="model-explainer">
         <strong>Transcription</strong> turns the video's audio into a word-by-word text transcript
         (with timestamps) — this is what powers subtitles/captions and is what the LLM above reads
-        to pick moments. It's a separate step from the LLM and runs independently of it.
+        to pick moments. It always runs via OpenRouter's <code>openai/whisper-1</code>, using the
+        same OpenRouter key above (so that key is required even if you use Gemini for moment-picking).
+        There's no local model to download or run — long videos are automatically chunked to stay
+        under the API's upload size limit, so this works the same on a 2-minute clip or a 2-hour one.
       </div>
-
-      <label>Transcription provider
-        <select id="transcriptionProvider">
-          <option value="local">Local (faster-whisper) — free, runs on this server's CPU/GPU</option>
-          <option value="openrouter">OpenRouter (openai/whisper-1) — uses your OpenRouter key above, ~$0.006/min, offloads all CPU work to the cloud</option>
-        </select>
-      </label>
-
-      <label id="whisperSizeLabel">Local Whisper model size
-        <select id="whisperSize">
-          <option value="tiny">tiny (fastest, least accurate)</option>
-          <option value="base">base</option>
-          <option value="small">small (recommended)</option>
-          <option value="medium">medium (slower, more accurate)</option>
-        </select>
-      </label>
 
       <details id="cookiesDetails">
         <summary>YouTube blocking downloads with "Sign in to confirm you're not a bot"?</summary>
@@ -147,14 +134,6 @@
         </div>
         <p id="cookiesStatus" class="muted"></p>
       </details>
-
-      <label>Processing device
-        <select id="device">
-          <option value="auto">Auto-detect (recommended)</option>
-          <option value="cpu">Force CPU</option>
-          <option value="cuda">Force GPU (NVIDIA)</option>
-        </select>
-      </label>
 
       <p id="settingsStatus" class="muted"></p>
       <div class="row">
